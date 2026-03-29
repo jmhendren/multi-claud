@@ -122,7 +122,7 @@ Config:
 ---
 
 ### Packet 4: Orchestrator — Build Plan Generation
-**Status:** Not Started
+**Status:** Complete
 **Scope:** Integrate the Claude Agent SDK to create an orchestrator that reads a project and generates a build plan with packets, dependencies, and risk notes.
 **Depends on:** Packet 1, Packet 2
 **Can be built in parallel with:** Packet 5
@@ -140,7 +140,7 @@ Config:
 ---
 
 ### Packet 5: Worker Manager
-**Status:** Not Started
+**Status:** Complete
 **Scope:** Launch Claude Code sessions in headless mode with git worktrees. Monitor their progress. Report status back to the state file.
 **Depends on:** Packet 1, Packet 2
 **Can be built in parallel with:** Packet 4

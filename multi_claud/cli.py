@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import sys
 import webbrowser
@@ -174,11 +176,28 @@ def status(
 def plan(
     description: str = typer.Argument(help="Describe what to build"),
     project_dir: Path = typer.Option(None, "--dir", help="Project directory"),
+    model: str = typer.Option(None, "--model", "-m", help="Override orchestrator model"),
 ) -> None:
     """Generate a build plan using the orchestrator."""
+    import asyncio
+    from multi_claud.orchestrator import create_plan
+
     sm = _get_sm(project_dir)
     _require_init(sm)
-    console.print("[yellow]Plan command not yet implemented.[/yellow] Coming in Packet 4 (Orchestrator).")
+
+    console.print(f"[cyan]Creating build plan...[/cyan] This may take a minute.")
+    console.print(f"  Description: {description}")
+
+    try:
+        packets = asyncio.run(create_plan(sm, description, model=model))
+        console.print(f"\n[green]Created {len(packets)} packets.[/green]")
+        for i, p in enumerate(packets, 1):
+            console.print(f"  {i}. {p['name']}")
+        console.print(f"\nRun [bold]multi-claud status[/bold] to see the full plan.")
+        console.print(f"Run [bold]multi-claud dashboard[/bold] to see it visually.")
+    except Exception as e:
+        console.print(f"[red]Error creating plan:[/red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -187,9 +206,50 @@ def start(
     workers: int = typer.Option(None, "--workers", "-w", help="Number of workers to launch"),
 ) -> None:
     """Launch worker sessions for ready packets."""
+    import asyncio
+    from multi_claud.worker import WorkerManager
+
     sm = _get_sm(project_dir)
     _require_init(sm)
-    console.print("[yellow]Start command not yet implemented.[/yellow] Coming in Packet 5 (Worker Manager).")
+
+    state = sm.load()
+    ready = sm.get_ready_packets()
+    if not ready:
+        console.print("[yellow]No packets are ready to work on.[/yellow]")
+        console.print("Run [bold]multi-claud plan[/bold] to create a build plan first.")
+        raise typer.Exit(0)
+
+    max_w = workers or state.config.max_workers
+    console.print(f"[cyan]Launching up to {max_w} workers...[/cyan]")
+
+    async def run():
+        wm = WorkerManager(sm)
+        launched = await wm.launch_available(max_workers=max_w)
+        if launched:
+            console.print(f"[green]Launched {len(launched)} worker(s).[/green]")
+            for wid in launched:
+                w = sm.get_worker(wid)
+                if w:
+                    console.print(f"  {w.name} → packet {w.assigned_packet}")
+            console.print("\n[dim]Workers running in background. Use [bold]multi-claud status[/bold] to check progress.[/dim]")
+            console.print("[dim]Use [bold]multi-claud dashboard[/bold] to watch in real-time.[/dim]")
+
+            # Wait for all workers to finish
+            try:
+                await asyncio.gather(*[
+                    wp.wait() for wp in wm.workers.values() if wp.is_running
+                ])
+                console.print("\n[green]All workers finished.[/green]")
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopping workers...[/yellow]")
+                await wm.stop_all()
+        else:
+            console.print("[yellow]No workers launched.[/yellow] All slots may be full or no packets ready.")
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
 
 
 @app.command()
@@ -199,7 +259,30 @@ def stop(
     """Stop all running workers."""
     sm = _get_sm(project_dir)
     _require_init(sm)
-    console.print("[yellow]Stop command not yet implemented.[/yellow] Coming in Packet 5 (Worker Manager).")
+
+    state = sm.load()
+    active = [w for w in state.workers if w.status.value == "working"]
+    if not active:
+        console.print("[dim]No active workers to stop.[/dim]")
+        return
+
+    # Kill processes by PID
+    import os
+    stopped = 0
+    for w in active:
+        if w.pid:
+            try:
+                os.kill(w.pid, signal.SIGTERM)
+                stopped += 1
+            except ProcessLookupError:
+                pass  # Already dead
+        sm.update_worker(w.id, status=WorkerStatus.stopped)
+        if w.assigned_packet:
+            pkt = sm.get_packet(w.assigned_packet)
+            if pkt and pkt.status == PacketStatus.in_progress:
+                sm.update_packet(pkt.id, status=PacketStatus.ready)
+
+    console.print(f"[green]Stopped {stopped} worker(s).[/green]")
 
 
 @app.command()
