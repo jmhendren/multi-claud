@@ -90,7 +90,7 @@ Config:
 ---
 
 ### Packet 2: CLI Framework
-**Status:** Not Started
+**Status:** Complete
 **Scope:** Build the Typer CLI with all subcommands. Wire in `init` and `status` as fully working commands. Other commands are stubs that print "not yet implemented."
 **Depends on:** Packet 1
 **Files to create:**
@@ -105,7 +105,7 @@ Config:
 ---
 
 ### Packet 3: Web Dashboard
-**Status:** Not Started
+**Status:** Complete
 **Scope:** Build the FastAPI server and kanban dashboard. The dashboard reads state via SSE and displays it as a kanban board with dark theme.
 **Depends on:** Packet 1
 **Can be built in parallel with:** Packet 2

@@ -247,6 +247,10 @@ class StateManager:
 
     def update_packet(self, packet_id: str, **updates: Any) -> Packet:
         """Update a packet's fields."""
+        # Coerce string values to enums where needed
+        if "status" in updates and isinstance(updates["status"], str):
+            updates["status"] = PacketStatus(updates["status"])
+
         def _do(state: ProjectState) -> Packet:
             packet = next((p for p in state.packets if p.id == packet_id), None)
             if packet is None:
@@ -299,6 +303,9 @@ class StateManager:
 
     def update_worker(self, worker_id: str, **updates: Any) -> Worker:
         """Update a worker's fields."""
+        if "status" in updates and isinstance(updates["status"], str):
+            updates["status"] = WorkerStatus(updates["status"])
+
         def _do(state: ProjectState) -> Worker:
             worker = next((w for w in state.workers if w.id == worker_id), None)
             if worker is None:
