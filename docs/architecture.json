@@ -1,0 +1,210 @@
+{
+  "project": {
+    "name": "Multi-Claud",
+    "description": "CLI tool that orchestrates multiple Claude Code sessions working on the same project in parallel, with a web-based kanban dashboard",
+    "language": "Python 3.13",
+    "framework": "FastAPI + Typer + Claude Agent SDK",
+    "created": "2026-03-29",
+    "lastUpdated": "2026-03-29"
+  },
+  "components": [
+    {
+      "id": "cli",
+      "name": "CLI Interface",
+      "description": "Typer-based command-line interface. Entry point for all user commands: init, plan, start, status, stop, dashboard, merge.",
+      "type": "interface",
+      "path": "multi_claud/cli.py",
+      "status": "planned",
+      "dependencies": ["state"],
+      "notes": "Installed as 'multi-claud' console script via pyproject.toml"
+    },
+    {
+      "id": "state",
+      "name": "State Manager",
+      "description": "Core state management. Pydantic data models for packets, workers, risks. JSON file read/write with filelock for safe concurrent access.",
+      "type": "core",
+      "path": "multi_claud/state.py",
+      "status": "planned",
+      "dependencies": [],
+      "notes": "Foundation — everything else depends on this. State file lives at .multi-claud/state.json in target projects."
+    },
+    {
+      "id": "orchestrator",
+      "name": "Orchestrator",
+      "description": "Uses Claude Agent SDK to run an orchestrator Claude session that creates build plans, assigns packets to workers, and manages the overall workflow.",
+      "type": "service",
+      "path": "multi_claud/orchestrator.py",
+      "status": "planned",
+      "dependencies": ["state", "cli"],
+      "notes": "Uses claude-agent-sdk to programmatically control a Claude Opus session"
+    },
+    {
+      "id": "worker-manager",
+      "name": "Worker Manager",
+      "description": "Launches and monitors Claude Code CLI sessions in headless mode. Each worker runs in an isolated git worktree. Manages worker lifecycle (start, monitor, complete, fail, cleanup).",
+      "type": "service",
+      "path": "multi_claud/worker.py",
+      "status": "planned",
+      "dependencies": ["state", "cli"],
+      "notes": "Workers are Claude Code subprocesses launched with: claude -p <prompt> --worktree <name> --output-format stream-json"
+    },
+    {
+      "id": "risk-detector",
+      "name": "Risk Detection Engine",
+      "description": "Monitors for risks across parallel workers: file conflicts between worktrees, duplicate effort, unwired code, dependency violations, stale workers.",
+      "type": "service",
+      "path": "multi_claud/risk.py",
+      "status": "planned",
+      "dependencies": ["state", "worker-manager"],
+      "notes": "Runs continuously while workers are active. Critical risks pause the affected worker."
+    },
+    {
+      "id": "dashboard-server",
+      "name": "Dashboard Server",
+      "description": "FastAPI web server that serves the kanban dashboard and streams state updates via Server-Sent Events (SSE).",
+      "type": "service",
+      "path": "multi_claud/server.py",
+      "status": "planned",
+      "dependencies": ["state"],
+      "notes": "Runs on localhost:8420 by default"
+    },
+    {
+      "id": "dashboard-ui",
+      "name": "Dashboard UI",
+      "description": "Web-based kanban board. Dark theme, real-time updates via SSE, SortableJS for drag-and-drop. Shows packet status, worker assignments, and risk alerts.",
+      "type": "interface",
+      "path": "dashboard/index.html",
+      "status": "planned",
+      "dependencies": ["dashboard-server"],
+      "notes": "Single HTML file with embedded CSS and JS. No build step. Uses SortableJS from CDN."
+    },
+    {
+      "id": "orchestrator-prompt",
+      "name": "Orchestrator Prompt Template",
+      "description": "System prompt template given to the orchestrator Claude session. Instructs it on how to analyze a project and generate a build plan.",
+      "type": "template",
+      "path": "templates/orchestrator-prompt.md",
+      "status": "planned",
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "worker-prompt",
+      "name": "Worker Prompt Template",
+      "description": "System prompt template given to each worker Claude session. Includes documentation requirements, progress reporting, and scope constraints.",
+      "type": "template",
+      "path": "templates/worker-prompt.md",
+      "status": "planned",
+      "dependencies": [],
+      "notes": ""
+    }
+  ],
+  "dataFlows": [
+    {
+      "id": "cli-to-state",
+      "name": "CLI reads/writes state",
+      "from": "cli",
+      "to": "state",
+      "description": "CLI commands read and write the project state file",
+      "protocol": "function call",
+      "notes": ""
+    },
+    {
+      "id": "orchestrator-to-state",
+      "name": "Orchestrator writes plan to state",
+      "from": "orchestrator",
+      "to": "state",
+      "description": "Orchestrator generates packets and writes them to the state file",
+      "protocol": "function call",
+      "notes": ""
+    },
+    {
+      "id": "worker-to-state",
+      "name": "Workers report progress to state",
+      "from": "worker-manager",
+      "to": "state",
+      "description": "Worker manager updates worker status, packet progress, and files touched in the state file",
+      "protocol": "function call",
+      "notes": ""
+    },
+    {
+      "id": "risk-to-state",
+      "name": "Risk detector writes alerts to state",
+      "from": "risk-detector",
+      "to": "state",
+      "description": "Risk detector writes risk alerts to the state file when problems are detected",
+      "protocol": "function call",
+      "notes": ""
+    },
+    {
+      "id": "server-reads-state",
+      "name": "Dashboard server reads state",
+      "from": "dashboard-server",
+      "to": "state",
+      "description": "Dashboard server watches the state file for changes and streams updates via SSE",
+      "protocol": "file watch + SSE",
+      "notes": "Uses watchfiles to detect state file changes"
+    },
+    {
+      "id": "server-to-ui",
+      "name": "Server streams to dashboard",
+      "from": "dashboard-server",
+      "to": "dashboard-ui",
+      "description": "FastAPI streams state updates to the browser via Server-Sent Events",
+      "protocol": "SSE (HTTP)",
+      "notes": "Browser connects to GET /events endpoint"
+    },
+    {
+      "id": "orchestrator-to-worker",
+      "name": "Orchestrator assigns work to workers",
+      "from": "orchestrator",
+      "to": "worker-manager",
+      "description": "Orchestrator decides which packets to assign and tells the worker manager to launch sessions",
+      "protocol": "function call",
+      "notes": ""
+    },
+    {
+      "id": "risk-to-worker",
+      "name": "Risk detector pauses workers",
+      "from": "risk-detector",
+      "to": "worker-manager",
+      "description": "When a critical risk is detected, the risk detector can pause the affected worker",
+      "protocol": "function call",
+      "notes": "Only for critical risks. Info/warning risks are just logged."
+    }
+  ],
+  "externalServices": [
+    {
+      "id": "claude-agent-sdk",
+      "name": "Claude Agent SDK",
+      "type": "sdk",
+      "url": "https://platform.claude.com/docs/en/agent-sdk/overview",
+      "purpose": "Programmatically run the orchestrator Claude session that creates build plans and manages workflow",
+      "authMethod": "api-key (ANTHROPIC_API_KEY)",
+      "notes": "Package: claude-agent-sdk v0.1.52"
+    },
+    {
+      "id": "claude-code-cli",
+      "name": "Claude Code CLI",
+      "type": "cli",
+      "url": "https://code.claude.com",
+      "purpose": "Worker sessions are Claude Code CLI processes running in headless mode with --worktree isolation",
+      "authMethod": "user's existing Claude Code authentication",
+      "notes": "Launched via: claude -p <prompt> --worktree <name> --output-format stream-json"
+    }
+  ],
+  "infrastructure": {
+    "runtime": "Python 3.13",
+    "dataStorage": ["JSON state file (.multi-claud/state.json in target project)"],
+    "hosting": "local (CLI tool runs on user's machine)",
+    "notes": "Dashboard runs on localhost:8420. No cloud infrastructure needed."
+  },
+  "changelog": [
+    {
+      "date": "2026-03-29",
+      "description": "Initial architecture — project scaffolded with all planned components",
+      "packet": "setup",
+      "componentsAffected": ["cli", "state", "orchestrator", "worker-manager", "risk-detector", "dashboard-server", "dashboard-ui", "orchestrator-prompt", "worker-prompt"]
+    }
+  ]
+}

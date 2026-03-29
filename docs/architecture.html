@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f1117;
+    color: #e1e4e8;
+    line-height: 1.6;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  .header {
+    max-width: 1200px;
+    margin: 0 auto 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: #f0f3f6;
+    margin-bottom: 4px;
+  }
+
+  .header .description {
+    color: #8b949e;
+    font-size: 15px;
+  }
+
+  .header .meta {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    font-size: 13px;
+    color: #8b949e;
+  }
+
+  .meta-tag {
+    background: #1c2028;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 2px 10px;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .section {
+    margin-bottom: 32px;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f0f3f6;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-title .count {
+    background: #30363d;
+    color: #8b949e;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 1px 8px;
+    border-radius: 10px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px;
+  }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .card:hover {
+    border-color: #388bfd;
+    background: #1a2030;
+  }
+
+  .card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f0f3f6;
+    margin-bottom: 4px;
+  }
+
+  .card-description {
+    font-size: 13px;
+    color: #8b949e;
+    margin-bottom: 10px;
+  }
+
+  .card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .tag-type {
+    background: #1f2a3d;
+    color: #58a6ff;
+    border: 1px solid #264276;
+  }
+
+  .tag-status-live {
+    background: #1a2e1a;
+    color: #56d364;
+    border: 1px solid #26432e;
+  }
+
+  .tag-status-building {
+    background: #2e2a1a;
+    color: #d9a648;
+    border: 1px solid #43381e;
+  }
+
+  .tag-status-planned {
+    background: #1c2028;
+    color: #8b949e;
+    border: 1px solid #30363d;
+  }
+
+  .tag-path {
+    background: #1c2028;
+    color: #8b949e;
+    border: 1px solid #30363d;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 11px;
+  }
+
+  .flow-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 14px;
+  }
+
+  .flow-node {
+    background: #1f2a3d;
+    color: #58a6ff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .flow-connector {
+    color: #484f58;
+    font-size: 16px;
+  }
+
+  .flow-description {
+    font-size: 13px;
+    color: #8b949e;
+  }
+
+  .flow-protocol {
+    font-size: 11px;
+    color: #6e7681;
+    margin-top: 4px;
+  }
+
+  .external-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-left: 3px solid #a371f7;
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .external-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f0f3f6;
+    margin-bottom: 4px;
+  }
+
+  .external-purpose {
+    font-size: 13px;
+    color: #8b949e;
+    margin-bottom: 8px;
+  }
+
+  .changelog {
+    border-left: 2px solid #21262d;
+    padding-left: 20px;
+  }
+
+  .changelog-entry {
+    position: relative;
+    padding-bottom: 20px;
+  }
+
+  .changelog-entry:last-child {
+    padding-bottom: 0;
+  }
+
+  .changelog-entry::before {
+    content: '';
+    position: absolute;
+    left: -25px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #30363d;
+    border: 2px solid #0f1117;
+  }
+
+  .changelog-date {
+    font-size: 12px;
+    color: #6e7681;
+    margin-bottom: 2px;
+  }
+
+  .changelog-desc {
+    font-size: 14px;
+    color: #e1e4e8;
+  }
+
+  .changelog-packet {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 2px;
+  }
+
+  .detail-panel {
+    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 420px;
+    height: 100vh;
+    background: #161b22;
+    border-left: 1px solid #21262d;
+    padding: 24px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+  }
+
+  .detail-panel.open {
+    display: block;
+  }
+
+  .detail-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+
+  .detail-close:hover {
+    border-color: #8b949e;
+    color: #f0f3f6;
+  }
+
+  .detail-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #f0f3f6;
+    margin-bottom: 8px;
+    padding-right: 36px;
+  }
+
+  .detail-section {
+    margin-top: 20px;
+  }
+
+  .detail-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6e7681;
+    margin-bottom: 6px;
+  }
+
+  .detail-section p, .detail-section ul {
+    font-size: 14px;
+    color: #e1e4e8;
+  }
+
+  .detail-section ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .detail-section li {
+    padding: 4px 0;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .detail-section li:last-child {
+    border-bottom: none;
+  }
+
+  .infra-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .infra-item {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .infra-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6e7681;
+    margin-bottom: 4px;
+  }
+
+  .infra-value {
+    font-size: 15px;
+    color: #f0f3f6;
+    font-weight: 500;
+  }
+
+  .load-section {
+    text-align: center;
+    padding: 60px 20px;
+  }
+
+  .load-section p {
+    color: #8b949e;
+    margin-bottom: 16px;
+  }
+
+  .load-btn {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  .load-btn:hover {
+    background: #2ea043;
+  }
+
+  .error-msg {
+    background: #3d1a1a;
+    border: 1px solid #5a2020;
+    color: #f08080;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin: 20px auto;
+    max-width: 600px;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="load-section">
+    <p>Load the architecture JSON to view the project architecture.</p>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+    <button class="load-btn" onclick="document.getElementById('fileInput').click()">Load architecture.json</button>
+    <p style="margin-top: 12px; font-size: 13px;">Or drag and drop the file onto this page</p>
+  </div>
+</div>
+
+<div class="detail-panel" id="detailPanel">
+  <button class="detail-close" onclick="closeDetail()">&times;</button>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+let archData = null;
+
+// Try to load from same directory automatically
+fetch('architecture.json')
+  .then(r => { if (r.ok) return r.json(); throw new Error('not found'); })
+  .then(data => { archData = data; render(data); })
+  .catch(() => {});
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      archData = JSON.parse(evt.target.result);
+      render(archData);
+    } catch (err) {
+      document.getElementById('app').innerHTML = '<div class="error-msg">Invalid JSON file: ' + err.message + '</div>';
+    }
+  };
+  reader.readAsText(file);
+});
+
+// Drag and drop
+document.body.addEventListener('dragover', e => { e.preventDefault(); });
+document.body.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      archData = JSON.parse(evt.target.result);
+      render(archData);
+    } catch (err) {
+      document.getElementById('app').innerHTML = '<div class="error-msg">Invalid JSON: ' + err.message + '</div>';
+    }
+  };
+  reader.readAsText(file);
+});
+
+function statusClass(status) {
+  if (status === 'live' || status === 'complete' || status === 'active') return 'tag-status-live';
+  if (status === 'building' || status === 'in-progress') return 'tag-status-building';
+  return 'tag-status-planned';
+}
+
+function render(data) {
+  const p = data.project || {};
+  const components = data.components || [];
+  const flows = data.dataFlows || [];
+  const external = data.externalServices || [];
+  const infra = data.infrastructure || {};
+  const changelog = data.changelog || [];
+
+  let html = '';
+
+  // Header
+  html += '<div class="header">';
+  html += '<h1>' + esc(p.name || 'Project Architecture') + '</h1>';
+  if (p.description) html += '<div class="description">' + esc(p.description) + '</div>';
+  html += '<div class="meta">';
+  if (p.language) html += '<span class="meta-tag">' + esc(p.language) + '</span>';
+  if (p.framework) html += '<span class="meta-tag">' + esc(p.framework) + '</span>';
+  if (p.lastUpdated) html += '<span class="meta-tag">Updated: ' + esc(p.lastUpdated) + '</span>';
+  html += '</div></div>';
+
+  html += '<div class="container">';
+
+  // Components
+  if (components.length > 0) {
+    html += '<div class="section">';
+    html += '<div class="section-title">Components <span class="count">' + components.length + '</span></div>';
+    html += '<div class="grid">';
+    components.forEach(c => {
+      html += '<div class="card" onclick="showComponent(\'' + esc(c.id) + '\')">';
+      html += '<div class="card-name">' + esc(c.name) + '</div>';
+      html += '<div class="card-description">' + esc(c.description) + '</div>';
+      html += '<div class="card-meta">';
+      if (c.type) html += '<span class="tag tag-type">' + esc(c.type) + '</span>';
+      if (c.status) html += '<span class="tag ' + statusClass(c.status) + '">' + esc(c.status) + '</span>';
+      if (c.path) html += '<span class="tag tag-path">' + esc(c.path) + '</span>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Data Flows
+  if (flows.length > 0) {
+    html += '<div class="section">';
+    html += '<div class="section-title">Data Flows <span class="count">' + flows.length + '</span></div>';
+    html += '<div class="grid">';
+    flows.forEach(f => {
+      const fromName = findName(components, f.from);
+      const toName = findName(components, f.to);
+      html += '<div class="flow-card">';
+      html += '<div class="flow-arrow">';
+      html += '<span class="flow-node">' + esc(fromName) + '</span>';
+      html += '<span class="flow-connector">&rarr;</span>';
+      html += '<span class="flow-node">' + esc(toName) + '</span>';
+      html += '</div>';
+      html += '<div class="flow-description">' + esc(f.description) + '</div>';
+      if (f.protocol) html += '<div class="flow-protocol">via ' + esc(f.protocol) + '</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  // External Services
+  if (external.length > 0) {
+    html += '<div class="section">';
+    html += '<div class="section-title">External Services <span class="count">' + external.length + '</span></div>';
+    html += '<div class="grid">';
+    external.forEach(e => {
+      html += '<div class="external-card">';
+      html += '<div class="external-name">' + esc(e.name) + '</div>';
+      html += '<div class="external-purpose">' + esc(e.purpose) + '</div>';
+      html += '<div class="card-meta">';
+      if (e.type) html += '<span class="tag tag-type">' + esc(e.type) + '</span>';
+      if (e.authMethod) html += '<span class="tag tag-path">' + esc(e.authMethod) + '</span>';
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // Infrastructure
+  html += '<div class="section">';
+  html += '<div class="section-title">Infrastructure</div>';
+  html += '<div class="infra-grid">';
+  if (infra.runtime) {
+    html += '<div class="infra-item"><div class="infra-label">Runtime</div><div class="infra-value">' + esc(infra.runtime) + '</div></div>';
+  }
+  if (infra.hosting) {
+    html += '<div class="infra-item"><div class="infra-label">Hosting</div><div class="infra-value">' + esc(infra.hosting) + '</div></div>';
+  }
+  if (infra.dataStorage && infra.dataStorage.length > 0) {
+    html += '<div class="infra-item"><div class="infra-label">Data Storage</div><div class="infra-value">' + infra.dataStorage.map(esc).join(', ') + '</div></div>';
+  }
+  if (infra.notes) {
+    html += '<div class="infra-item"><div class="infra-label">Notes</div><div class="infra-value">' + esc(infra.notes) + '</div></div>';
+  }
+  html += '</div></div>';
+
+  // Changelog
+  if (changelog.length > 0) {
+    html += '<div class="section">';
+    html += '<div class="section-title">Changelog <span class="count">' + changelog.length + '</span></div>';
+    html += '<div class="changelog">';
+    changelog.slice().reverse().forEach(entry => {
+      html += '<div class="changelog-entry">';
+      html += '<div class="changelog-date">' + esc(entry.date || '') + '</div>';
+      html += '<div class="changelog-desc">' + esc(entry.description) + '</div>';
+      if (entry.packet) html += '<div class="changelog-packet">Packet: ' + esc(entry.packet) + '</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  document.getElementById('app').innerHTML = html;
+}
+
+function findName(components, id) {
+  const c = components.find(c => c.id === id);
+  return c ? c.name : id;
+}
+
+function showComponent(id) {
+  if (!archData) return;
+  const c = (archData.components || []).find(x => x.id === id);
+  if (!c) return;
+
+  const flows = (archData.dataFlows || []).filter(f => f.from === id || f.to === id);
+  const deps = (c.dependencies || []).map(d => {
+    const dep = (archData.components || []).find(x => x.id === d);
+    return dep ? dep.name : d;
+  });
+
+  let html = '<div class="detail-title">' + esc(c.name) + '</div>';
+
+  html += '<div class="detail-section"><h3>Description</h3><p>' + esc(c.description) + '</p></div>';
+
+  if (c.path) {
+    html += '<div class="detail-section"><h3>Path</h3><p style="font-family: monospace; font-size: 13px;">' + esc(c.path) + '</p></div>';
+  }
+
+  html += '<div class="detail-section"><h3>Status</h3><p><span class="tag ' + statusClass(c.status) + '">' + esc(c.status || 'unknown') + '</span></p></div>';
+
+  if (deps.length > 0) {
+    html += '<div class="detail-section"><h3>Dependencies</h3><ul>';
+    deps.forEach(d => { html += '<li>' + esc(d) + '</li>'; });
+    html += '</ul></div>';
+  }
+
+  if (flows.length > 0) {
+    html += '<div class="detail-section"><h3>Data Flows</h3><ul>';
+    flows.forEach(f => {
+      const fromName = findName(archData.components, f.from);
+      const toName = findName(archData.components, f.to);
+      html += '<li>' + esc(fromName) + ' &rarr; ' + esc(toName) + ': ' + esc(f.description) + '</li>';
+    });
+    html += '</ul></div>';
+  }
+
+  if (c.notes) {
+    html += '<div class="detail-section"><h3>Notes</h3><p>' + esc(c.notes) + '</p></div>';
+  }
+
+  document.getElementById('detailContent').innerHTML = html;
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDetail();
+});
+
+function esc(str) {
+  if (typeof str !== 'string') return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
