@@ -61,6 +61,7 @@ multi-claud merge
 | `multi-claud status` | Show current state in the terminal |
 | `multi-claud dashboard` | Open the web-based kanban dashboard |
 | `multi-claud stop` | Stop all running workers |
+| `multi-claud scan` | Run a risk scan and report findings |
 | `multi-claud merge` | Merge completed worktree branches back to main |
 
 ## How It Works
