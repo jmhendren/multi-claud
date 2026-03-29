@@ -323,7 +323,60 @@ def merge(
     """Merge completed worktree branches back to main."""
     sm = _get_sm(project_dir)
     _require_init(sm)
-    console.print("[yellow]Merge command not yet implemented.[/yellow] Coming in Packet 7 (Integration).")
+
+    state = sm.load()
+    completed = [w for w in state.workers if w.worktree_branch and w.status != WorkerStatus.working]
+
+    if not completed:
+        console.print("[dim]No completed worktree branches to merge.[/dim]")
+        return
+
+    project_path = project_dir or Path.cwd()
+    merged = 0
+    for w in completed:
+        if not w.worktree_branch:
+            continue
+        console.print(f"  Merging branch [bold]{w.worktree_branch}[/bold] from {w.name}...")
+        try:
+            result = subprocess.run(
+                ["git", "merge", w.worktree_branch, "--no-edit"],
+                cwd=str(project_path),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                console.print(f"    [green]Merged successfully.[/green]")
+                merged += 1
+            else:
+                console.print(f"    [red]Merge conflict.[/red] Resolve manually:")
+                console.print(f"    {result.stderr.strip()}")
+        except FileNotFoundError:
+            console.print("    [red]Git not found.[/red]")
+
+    console.print(f"\n[green]Merged {merged}/{len(completed)} branches.[/green]")
+
+
+@app.command()
+def scan(
+    project_dir: Path = typer.Option(None, "--dir", help="Project directory"),
+) -> None:
+    """Run a risk scan across all active workers."""
+    from multi_claud.risk import RiskDetector
+
+    sm = _get_sm(project_dir)
+    _require_init(sm)
+
+    rd = RiskDetector(sm)
+    risks = rd.scan_all()
+
+    if risks:
+        console.print(f"\n[yellow]Found {len(risks)} new risk(s):[/yellow]")
+        for r in risks:
+            severity_colors = {"info": "blue", "warning": "yellow", "critical": "red"}
+            color = severity_colors.get(r.severity.value, "white")
+            console.print(f"  [{color}]{r.severity.value.upper()}[/{color}] {r.description}")
+    else:
+        console.print("[green]No new risks detected.[/green]")
 
 
 if __name__ == "__main__":
