@@ -316,7 +316,8 @@ class StateManager:
                     raise ValueError(f"Worker has no field '{key}'")
                 setattr(worker, key, value)
 
-            worker.last_activity = datetime.now(timezone.utc)
+            if "last_activity" not in updates:
+                worker.last_activity = datetime.now(timezone.utc)
             return worker
 
         return self._transact(_do)
