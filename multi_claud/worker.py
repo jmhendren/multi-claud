@@ -261,6 +261,52 @@ class WorkerManager:
 
         return launched
 
+    async def run_auto(self, max_workers: int | None = None, poll_interval: int = 5) -> None:
+        """Auto-continue mode: launch workers, wait, launch next round, repeat.
+
+        Keeps running until all packets are complete or no more work can be done.
+        """
+        state = self.sm.load()
+        limit = max_workers or state.config.max_workers
+        total_packets = len(state.packets)
+
+        logger.info("Auto-continue mode: %d packets, up to %d workers", total_packets, limit)
+
+        while True:
+            # Launch any available work
+            launched = await self.launch_available(max_workers=limit)
+            if launched:
+                logger.info("Launched %d new worker(s)", len(launched))
+
+            # Check if there's any running work
+            running = [wp for wp in self.workers.values() if wp.is_running]
+
+            if not running:
+                # Nothing running — check if there's anything left to do
+                state = self.sm.load()
+                ready = [p for p in state.packets if p.status.value == "ready"]
+                blocked = [p for p in state.packets if p.status.value == "blocked"]
+                complete = [p for p in state.packets if p.status.value == "complete"]
+
+                if not ready and not blocked:
+                    logger.info("All packets complete or no more work available")
+                    break
+                elif not ready and blocked:
+                    # Everything remaining is blocked — check if it's stuck
+                    in_prog = [p for p in state.packets if p.status.value == "in_progress"]
+                    if not in_prog:
+                        logger.warning("Remaining packets are blocked with no work in progress — may be stuck")
+                        break
+
+            # Wait before checking again
+            await asyncio.sleep(poll_interval)
+
+        # Final summary
+        state = self.sm.load()
+        complete = len([p for p in state.packets if p.status.value == "complete"])
+        total = len(state.packets)
+        logger.info("Auto-continue finished: %d/%d packets complete", complete, total)
+
     async def stop_all(self) -> None:
         """Stop all running workers."""
         for worker_id, wp in list(self.workers.items()):

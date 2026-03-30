@@ -204,6 +204,7 @@ def plan(
 def start(
     project_dir: Path = typer.Option(None, "--dir", help="Project directory"),
     workers: int = typer.Option(None, "--workers", "-w", help="Number of workers to launch"),
+    auto: bool = typer.Option(False, "--auto", "-a", help="Auto-continue: launch next round when current finishes"),
 ) -> None:
     """Launch worker sessions for ready packets."""
     import asyncio
@@ -220,36 +221,55 @@ def start(
         raise typer.Exit(0)
 
     max_w = workers or state.config.max_workers
-    console.print(f"[cyan]Launching up to {max_w} workers...[/cyan]")
 
-    async def run():
-        wm = WorkerManager(sm)
-        launched = await wm.launch_available(max_workers=max_w)
-        if launched:
-            console.print(f"[green]Launched {len(launched)} worker(s).[/green]")
-            for wid in launched:
-                w = sm.get_worker(wid)
-                if w:
-                    console.print(f"  {w.name} → packet {w.assigned_packet}")
-            console.print("\n[dim]Workers running in background. Use [bold]multi-claud status[/bold] to check progress.[/dim]")
-            console.print("[dim]Use [bold]multi-claud dashboard[/bold] to watch in real-time.[/dim]")
+    if auto:
+        console.print(f"[cyan]Auto-continue mode:[/cyan] launching up to {max_w} workers per round")
+        console.print("[dim]Will automatically start next round when packets become ready.[/dim]")
+        console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
-            # Wait for all workers to finish
+        async def run_auto():
+            wm = WorkerManager(sm)
             try:
-                await asyncio.gather(*[
-                    wp.wait() for wp in wm.workers.values() if wp.is_running
-                ])
-                console.print("\n[green]All workers finished.[/green]")
+                await wm.run_auto(max_workers=max_w)
+                console.print("\n[green]All work complete.[/green]")
             except KeyboardInterrupt:
                 console.print("\n[yellow]Stopping workers...[/yellow]")
                 await wm.stop_all()
-        else:
-            console.print("[yellow]No workers launched.[/yellow] All slots may be full or no packets ready.")
 
-    try:
-        asyncio.run(run())
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted.[/yellow]")
+        try:
+            asyncio.run(run_auto())
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted.[/yellow]")
+    else:
+        console.print(f"[cyan]Launching up to {max_w} workers...[/cyan]")
+
+        async def run():
+            wm = WorkerManager(sm)
+            launched = await wm.launch_available(max_workers=max_w)
+            if launched:
+                console.print(f"[green]Launched {len(launched)} worker(s).[/green]")
+                for wid in launched:
+                    w = sm.get_worker(wid)
+                    if w:
+                        console.print(f"  {w.name} → packet {w.assigned_packet}")
+                console.print("\n[dim]Workers running. Use [bold]multi-claud status[/bold] to check progress.[/dim]")
+                console.print("[dim]Tip: use [bold]multi-claud start --auto[/bold] to auto-continue to next rounds.[/dim]")
+
+                try:
+                    await asyncio.gather(*[
+                        wp.wait() for wp in wm.workers.values() if wp.is_running
+                    ])
+                    console.print("\n[green]All workers finished.[/green]")
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]Stopping workers...[/yellow]")
+                    await wm.stop_all()
+            else:
+                console.print("[yellow]No workers launched.[/yellow] All slots may be full or no packets ready.")
+
+        try:
+            asyncio.run(run())
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted.[/yellow]")
 
 
 @app.command()
