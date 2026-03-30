@@ -486,7 +486,7 @@ function computePhases(packets) {
   for (const key of sortedKeys) {
     const phasePkts = phaseMap[key];
     const allDone = phasePkts.every(p => p.status === 'complete');
-    const anyActive = phasePkts.some(p => p.status === 'in_progress' || p.status === 'review');
+    const anyActive = phasePkts.some(p => p.status === 'in_progress');
     const names = phasePkts.map(p => p.name);
     // Create a short label from packet names
     let label = names.length <= 2 ? names.join(' & ') : names[0] + ' + ' + (names.length - 1) + ' more';
@@ -531,9 +531,9 @@ function render(s) {
     banner.classList.remove('visible');
   }
 
-  // 3-column layout: Open (backlog+ready+blocked), In Progress (in_progress+review), Complete
+  // 3-column layout: Open (backlog+ready+blocked), In Progress (in_progress), Complete
   const openPkts = packets.filter(p => ['backlog','ready','blocked'].includes(p.status));
-  const inProgressPkts = packets.filter(p => ['in_progress','review'].includes(p.status));
+  const inProgressPkts = packets.filter(p => p.status === 'in_progress');
   const completePkts = packets.filter(p => p.status === 'complete');
 
   renderColumn('colOpen', 'countOpen', openPkts, phases);

@@ -24,7 +24,6 @@ class PacketStatus(str, Enum):
     backlog = "backlog"
     ready = "ready"
     in_progress = "in_progress"
-    review = "review"
     complete = "complete"
     blocked = "blocked"
 
@@ -161,9 +160,9 @@ class StateManager:
         # Normalize packet statuses
         packet_status_map = {
             "completed": "complete", "done": "complete", "finished": "complete",
+            "review": "complete", "reviewing": "complete",
             "todo": "backlog", "pending": "backlog", "queued": "ready",
             "wip": "in_progress", "working": "in_progress",
-            "reviewing": "review",
         }
         for p in data.get("packets", []):
             s = p.get("status", "")

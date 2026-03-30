@@ -101,7 +101,6 @@ def status(
             PacketStatus.backlog: "dim",
             PacketStatus.ready: "cyan",
             PacketStatus.in_progress: "yellow",
-            PacketStatus.review: "magenta",
             PacketStatus.complete: "green",
             PacketStatus.blocked: "red",
         }
