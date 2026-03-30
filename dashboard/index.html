@@ -351,6 +351,27 @@
 
   .conn-dot.connected { background: #7a9a6d; }
 
+  /* --- Card status message --- */
+  .card-status {
+    font-size: 12px;
+    line-height: 1.4;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #f0ebe2;
+    color: #7a7062;
+  }
+
+  .card-status.error {
+    background: #f5e0dc;
+    color: #9a4035;
+  }
+
+  .card-status.working {
+    background: #e5eddf;
+    color: #4a6a3f;
+  }
+
   /* --- Responsive --- */
   @media (max-width: 900px) {
     .board { flex-direction: column; }
@@ -598,6 +619,20 @@ function renderColumn(containerId, countId, packets, phases) {
       tags += `<span class="tag tag-worker">${esc(worker.name)}</span>`;
     }
 
+    // Status message (worker activity or error)
+    let statusHtml = '';
+    if (worker && worker.session_log && worker.session_log.length > 0) {
+      const lastLog = worker.session_log[worker.session_log.length - 1];
+      const isFail = lastLog.startsWith('FAILED') || lastLog.startsWith('EXCEPTION');
+      statusHtml = `<div class="card-status ${isFail ? 'error' : 'working'}">${esc(lastLog)}</div>`;
+    } else if (worker && worker.status === 'working') {
+      statusHtml = '<div class="card-status working">Working...</div>';
+    } else if (worker && worker.status === 'error') {
+      const errDoc = p.documentation && p.documentation.startsWith('Worker failed')
+        ? p.documentation : 'Worker encountered an error';
+      statusHtml = `<div class="card-status error">${esc(errDoc)}</div>`;
+    }
+
     return `<div class="card">
       <div class="card-header">
         <div class="card-name">${esc(p.name)}</div>
@@ -605,6 +640,7 @@ function renderColumn(containerId, countId, packets, phases) {
       </div>
       ${p.description ? `<div class="card-description">${esc(p.description)}</div>` : ''}
       <div class="card-tags">${tags}</div>
+      ${statusHtml}
     </div>`;
   }).join('');
 }

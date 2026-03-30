@@ -107,11 +107,11 @@ class WorkerManager:
         # Generate worktree branch name
         branch_name = f"mc-worker-{worker.id}-{packet_id[:6]}"
 
-        # Launch Claude Code in headless mode with a worktree
+        # Launch Claude Code in headless mode
         cmd = [
             "claude",
             "-p", prompt,
-            "--output-format", "stream-json",
+            "--output-format", "json",
             "--model", state.config.worker_model,
             "--allowedTools", "Read,Write,Edit,Bash,Glob,Grep",
             "--dangerously-skip-permissions",
@@ -149,32 +149,60 @@ class WorkerManager:
     async def _monitor_worker(self, wp: WorkerProcess, packet_id: str) -> None:
         """Monitor a worker's output and update state when it completes."""
         try:
-            # Read stdout line by line
-            while wp.process.stdout and not wp.process.stdout.at_eof():
-                line = await wp.process.stdout.readline()
-                if not line:
-                    break
-                decoded = line.decode("utf-8", errors="replace").strip()
-                if decoded:
-                    wp.output_lines.append(decoded)
-                    # Parse stream-json for progress updates
-                    self._process_output_line(wp, decoded, packet_id)
+            # Read stdout
+            stdout_data = b""
+            if wp.process.stdout:
+                stdout_data = await wp.process.stdout.read()
+
+            # Read stderr
+            stderr_data = b""
+            if wp.process.stderr:
+                stderr_data = await wp.process.stderr.read()
 
             # Wait for process to finish
             exit_code = await wp.wait()
+
+            stdout_text = stdout_data.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
+
+            if stdout_text:
+                wp.output_lines.append(stdout_text)
+
+            # Try to parse JSON output for file tracking
+            if stdout_text:
+                try:
+                    result = json.loads(stdout_text)
+                    # JSON output has a "result" field with the response text
+                    if isinstance(result, dict) and result.get("result"):
+                        self.sm.update_packet(
+                            packet_id,
+                            documentation=result["result"][:2000],
+                        )
+                except json.JSONDecodeError:
+                    pass
 
             # Update state based on exit code
             if exit_code == 0:
                 self.sm.update_worker(wp.worker_id, status=WorkerStatus.idle)
                 self.sm.update_packet(packet_id, status=PacketStatus.review)
+                log_entry = f"Completed successfully"
+                self.sm.update_worker(wp.worker_id, session_log=[log_entry])
                 logger.info("Worker %s completed successfully", wp.worker_id)
             else:
                 self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
-                logger.error("Worker %s failed with exit code %d", wp.worker_id, exit_code)
+                error_msg = stderr_text[:500] if stderr_text else f"Exit code {exit_code}"
+                log_entry = f"FAILED: {error_msg}"
+                self.sm.update_worker(wp.worker_id, session_log=[log_entry])
+                self.sm.update_packet(
+                    packet_id,
+                    documentation=f"Worker failed: {error_msg}",
+                )
+                logger.error("Worker %s failed (exit %d): %s", wp.worker_id, exit_code, error_msg)
 
         except Exception as e:
             logger.error("Error monitoring worker %s: %s", wp.worker_id, e)
             self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
+            self.sm.update_worker(wp.worker_id, session_log=[f"EXCEPTION: {e}"])
 
     def _process_output_line(self, wp: WorkerProcess, line: str, packet_id: str) -> None:
         """Process a line of stream-json output from a worker."""
