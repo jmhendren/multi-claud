@@ -4,97 +4,121 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multi-Claud Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.7/Sortable.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
+    background: #ece5d8;
+    color: #3d3529;
     min-height: 100vh;
-    overflow-x: auto;
   }
 
-  /* --- Header --- */
-  .header {
-    padding: 16px 24px;
-    border-bottom: 1px solid #1e293b;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #0f172a;
+  /* --- Phase Progress Bar --- */
+  .phase-bar {
+    background: #f5efe6;
+    border-bottom: 1px solid #ddd5c8;
+    padding: 20px 32px 18px;
+    overflow-x: auto;
     position: sticky;
     top: 0;
     z-index: 10;
   }
 
-  .header-left {
+  .phase-track {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: fit-content;
+    gap: 0;
   }
 
-  .header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #f1f5f9;
-  }
-
-  .header .project-name {
-    font-size: 14px;
-    color: #94a3b8;
-    padding: 2px 10px;
-    background: #1e293b;
-    border-radius: 6px;
-  }
-
-  .connection-status {
+  .phase-step {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: #64748b;
+    min-width: 180px;
+    position: relative;
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
+  .phase-connector {
+    position: absolute;
+    top: 14px;
+    left: calc(50% + 16px);
+    width: calc(100% - 32px);
+    height: 3px;
+    background: #d1c9ba;
+    z-index: 0;
+  }
+
+  .phase-connector.done { background: #7a9a6d; }
+
+  .phase-node {
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: #ef4444;
-  }
-
-  .status-dot.connected { background: #22c55e; }
-
-  /* --- Stats Bar --- */
-  .stats-bar {
-    display: flex;
-    gap: 24px;
-    padding: 12px 24px;
-    border-bottom: 1px solid #1e293b;
-    font-size: 13px;
-    color: #94a3b8;
-  }
-
-  .stat {
+    border: 3px solid #d1c9ba;
+    background: #f5efe6;
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #a69e8e;
+    z-index: 1;
+    position: relative;
   }
 
-  .stat-value {
-    font-weight: 600;
-    color: #f1f5f9;
+  .phase-node.done {
+    background: #7a9a6d;
+    border-color: #7a9a6d;
+    color: white;
   }
+
+  .phase-node.active {
+    border-color: #8a7e6e;
+    background: #f5efe6;
+    color: #5c5344;
+  }
+
+  .phase-node.done::after {
+    content: '\2713';
+    font-size: 15px;
+  }
+
+  .phase-label {
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: #a69e8e;
+    text-align: center;
+  }
+
+  .phase-label.done { color: #7a9a6d; }
+  .phase-label.active { color: #5c5344; }
+
+  .phase-name {
+    font-size: 11px;
+    color: #a69e8e;
+    text-align: center;
+    max-width: 160px;
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+
+  .phase-name.done { color: #7a9a6d; }
+  .phase-name.active { color: #5c5344; }
 
   /* --- Risk Banner --- */
   .risk-banner {
     display: none;
-    padding: 10px 24px;
-    background: #451a03;
-    border-bottom: 1px solid #92400e;
+    padding: 10px 32px;
+    background: #f0e0c8;
+    border-bottom: 1px solid #d9c9a8;
     font-size: 13px;
-    color: #fbbf24;
+    color: #8a6830;
   }
 
   .risk-banner.visible { display: block; }
@@ -103,25 +127,26 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 0;
+    padding: 3px 0;
   }
 
   .risk-badge {
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
-    padding: 1px 6px;
+    padding: 2px 7px;
     border-radius: 3px;
+    letter-spacing: 0.3px;
   }
 
-  .risk-badge.critical { background: #dc2626; color: white; }
-  .risk-badge.warning { background: #d97706; color: white; }
-  .risk-badge.info { background: #2563eb; color: white; }
+  .risk-badge.critical { background: #c27a6b; color: white; }
+  .risk-badge.warning { background: #c9a84c; color: white; }
+  .risk-badge.info { background: #7a9a6d; color: white; }
 
   /* --- Board --- */
   .board {
     display: flex;
-    gap: 12px;
+    gap: 16px;
     padding: 20px 24px;
     min-height: calc(100vh - 120px);
     align-items: flex-start;
@@ -130,273 +155,238 @@
   /* --- Columns --- */
   .column {
     flex: 1;
-    min-width: 260px;
-    max-width: 340px;
-    background: #1e293b;
-    border-radius: 10px;
+    min-width: 300px;
+    background: #e2dace;
+    border-radius: 12px;
     display: flex;
     flex-direction: column;
+    border: 1px solid #d5cdbf;
   }
 
   .column-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px 10px;
+    padding: 16px 20px 12px;
   }
 
   .column-title {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #94a3b8;
+    font-size: 18px;
+    font-weight: 700;
+    color: #3d3529;
   }
 
   .column-count {
-    font-size: 12px;
-    font-weight: 500;
-    color: #64748b;
-    background: #0f172a;
-    padding: 1px 8px;
-    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #8a7e6e;
+    background: #d5cdbf;
+    padding: 2px 12px;
+    border-radius: 12px;
   }
 
   .column-cards {
-    padding: 0 10px 10px;
-    min-height: 60px;
+    padding: 0 12px 12px;
+    min-height: 80px;
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
-
-  /* Column accent colors */
-  .column[data-status="backlog"] .column-title { color: #64748b; }
-  .column[data-status="ready"] .column-title { color: #38bdf8; }
-  .column[data-status="in_progress"] .column-title { color: #fbbf24; }
-  .column[data-status="review"] .column-title { color: #c084fc; }
-  .column[data-status="complete"] .column-title { color: #4ade80; }
 
   /* --- Cards --- */
   .card {
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 12px 14px;
+    background: #faf7f2;
+    border: 1px solid #e8e1d5;
+    border-radius: 10px;
+    padding: 16px 18px;
     cursor: default;
-    transition: border-color 0.15s, transform 0.1s;
+    transition: box-shadow 0.15s, transform 0.1s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
 
   .card:hover {
-    border-color: #475569;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transform: translateY(-1px);
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 6px;
   }
 
   .card-name {
-    font-size: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #2c2418;
+    line-height: 1.35;
+    flex: 1;
+  }
+
+  .card-id {
+    font-size: 12px;
+    color: #a69e8e;
     font-weight: 500;
-    color: #f1f5f9;
-    margin-bottom: 4px;
-    line-height: 1.3;
+    white-space: nowrap;
+    margin-top: 2px;
   }
 
   .card-description {
-    font-size: 12px;
-    color: #64748b;
-    margin-bottom: 8px;
-    line-height: 1.4;
+    font-size: 13px;
+    color: #7a7062;
+    margin-bottom: 10px;
+    line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .card-meta {
+  .card-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 6px;
     align-items: center;
   }
 
   .tag {
-    font-size: 10px;
-    font-weight: 500;
-    padding: 2px 7px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-
-  .tag-worker {
-    background: #1e3a5f;
-    color: #7dd3fc;
-    border: 1px solid #1e40af;
-  }
-
-  .tag-blocked {
-    background: #3b1219;
-    color: #fca5a5;
-    border: 1px solid #7f1d1d;
-  }
-
-  .tag-risk {
-    background: #451a03;
-    color: #fbbf24;
-    border: 1px solid #92400e;
-  }
-
-  .tag-deps {
-    background: #1e293b;
-    color: #94a3b8;
-    border: 1px solid #334155;
-  }
-
-  .card-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid #1e293b;
     font-size: 11px;
-    color: #475569;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.2px;
   }
+
+  /* Tag colors — earthy, muted, matching the reference */
+  .tag-feature { background: #5c6a4f; color: #fff; }
+  .tag-worker  { background: #4a6a82; color: #fff; }
+  .tag-task    { background: #7a8a7a; color: #fff; }
+  .tag-bug     { background: #c27a6b; color: #fff; }
+  .tag-blocked { background: #3d3529; color: #fff; }
+  .tag-risk    { background: #c9a84c; color: #fff; }
+  .tag-high    { background: #c27a6b; color: #fff; }
+  .tag-phase   { background: #e8e0d4; color: #7a7062; }
+  .tag-chore   { background: #9a8c6c; color: #fff; }
+  .tag-deps    { background: #e8e0d4; color: #7a7062; }
 
   /* --- Workers Panel --- */
-  .workers-panel {
-    padding: 12px 24px 20px;
-    border-top: 1px solid #1e293b;
+  .workers-bar {
+    display: none;
+    padding: 14px 24px;
+    background: #e8e1d5;
+    border-top: 1px solid #d5cdbf;
   }
 
-  .workers-panel h2 {
-    font-size: 13px;
-    font-weight: 600;
+  .workers-bar.visible { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+
+  .workers-bar-title {
+    font-size: 12px;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: #94a3b8;
-    margin-bottom: 10px;
+    color: #8a7e6e;
+    margin-right: 8px;
   }
 
-  .workers-grid {
+  .worker-pill {
     display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .worker-card {
-    background: #1e293b;
-    border: 1px solid #334155;
+    align-items: center;
+    gap: 6px;
+    background: #faf7f2;
+    border: 1px solid #d5cdbf;
     border-radius: 8px;
-    padding: 12px 16px;
-    min-width: 200px;
-    flex: 1;
-    max-width: 300px;
+    padding: 6px 14px;
+    font-size: 13px;
   }
 
-  .worker-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: #f1f5f9;
-    margin-bottom: 4px;
+  .worker-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
   }
 
-  .worker-status {
+  .worker-dot.idle    { background: #a69e8e; }
+  .worker-dot.working { background: #7a9a6d; }
+  .worker-dot.paused  { background: #c9a84c; }
+  .worker-dot.error   { background: #c27a6b; }
+  .worker-dot.stopped { background: #a69e8e; }
+
+  .worker-pill-name {
+    font-weight: 600;
+    color: #3d3529;
+  }
+
+  .worker-pill-task {
+    color: #8a7e6e;
     font-size: 12px;
-    margin-bottom: 4px;
   }
 
-  .worker-status.idle { color: #64748b; }
-  .worker-status.working { color: #4ade80; }
-  .worker-status.paused { color: #fbbf24; }
-  .worker-status.error { color: #f87171; }
-  .worker-status.stopped { color: #64748b; }
-
-  .worker-packet {
+  /* --- Connection indicator --- */
+  .conn-indicator {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #faf7f2;
+    border: 1px solid #d5cdbf;
+    border-radius: 8px;
+    padding: 6px 12px;
     font-size: 11px;
-    color: #64748b;
+    color: #8a7e6e;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    z-index: 100;
   }
 
-  /* --- Empty state --- */
-  .empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #475569;
-    font-size: 14px;
-    grid-column: 1 / -1;
+  .conn-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c27a6b;
   }
 
-  .empty-state h2 {
-    font-size: 20px;
-    color: #64748b;
-    margin-bottom: 8px;
-  }
-
-  /* --- Sortable ghost --- */
-  .sortable-ghost {
-    opacity: 0.4;
-  }
+  .conn-dot.connected { background: #7a9a6d; }
 
   /* --- Responsive --- */
-  @media (max-width: 768px) {
+  @media (max-width: 900px) {
     .board { flex-direction: column; }
-    .column { max-width: 100%; }
+    .column { min-width: 100%; }
   }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="header-left">
-    <h1>Multi-Claud</h1>
-    <span class="project-name" id="projectName">Loading...</span>
-  </div>
-  <div class="connection-status">
-    <div class="status-dot" id="statusDot"></div>
-    <span id="connectionLabel">Connecting...</span>
-  </div>
-</div>
-
-<div class="stats-bar" id="statsBar">
-  <div class="stat">Packets: <span class="stat-value" id="statTotal">0</span></div>
-  <div class="stat">Complete: <span class="stat-value" id="statComplete">0</span></div>
-  <div class="stat">In Progress: <span class="stat-value" id="statInProgress">0</span></div>
-  <div class="stat">Blocked: <span class="stat-value" id="statBlocked">0</span></div>
-  <div class="stat">Workers Active: <span class="stat-value" id="statWorkers">0</span></div>
-  <div class="stat">Risks: <span class="stat-value" id="statRisks">0</span></div>
+<div class="phase-bar">
+  <div class="phase-track" id="phaseTrack"></div>
 </div>
 
 <div class="risk-banner" id="riskBanner"></div>
 
+<div class="workers-bar" id="workersBar">
+  <span class="workers-bar-title">Workers</span>
+  <div id="workersGrid" style="display:contents"></div>
+</div>
+
 <div class="board" id="board">
-  <div class="column" data-status="backlog">
+  <div class="column">
     <div class="column-header">
-      <span class="column-title">Backlog</span>
-      <span class="column-count" id="countBacklog">0</span>
+      <span class="column-title">Open</span>
+      <span class="column-count" id="countOpen">0</span>
     </div>
-    <div class="column-cards" id="colBacklog"></div>
+    <div class="column-cards" id="colOpen"></div>
   </div>
-  <div class="column" data-status="ready">
-    <div class="column-header">
-      <span class="column-title">Ready</span>
-      <span class="column-count" id="countReady">0</span>
-    </div>
-    <div class="column-cards" id="colReady"></div>
-  </div>
-  <div class="column" data-status="in_progress">
+  <div class="column">
     <div class="column-header">
       <span class="column-title">In Progress</span>
       <span class="column-count" id="countInProgress">0</span>
     </div>
     <div class="column-cards" id="colInProgress"></div>
   </div>
-  <div class="column" data-status="review">
-    <div class="column-header">
-      <span class="column-title">Review</span>
-      <span class="column-count" id="countReview">0</span>
-    </div>
-    <div class="column-cards" id="colReview"></div>
-  </div>
-  <div class="column" data-status="complete">
+  <div class="column">
     <div class="column-header">
       <span class="column-title">Complete</span>
       <span class="column-count" id="countComplete">0</span>
@@ -405,21 +395,20 @@
   </div>
 </div>
 
-<div class="workers-panel" id="workersPanel" style="display:none">
-  <h2>Workers</h2>
-  <div class="workers-grid" id="workersGrid"></div>
+<div class="conn-indicator">
+  <div class="conn-dot" id="connDot"></div>
+  <span id="connLabel">Connecting...</span>
 </div>
 
 <script>
-// --- State ---
 let state = null;
 let workerMap = {};
 let packetMap = {};
 
-// --- SSE Connection ---
+// --- SSE ---
 function connectSSE() {
-  const dot = document.getElementById('statusDot');
-  const label = document.getElementById('connectionLabel');
+  const dot = document.getElementById('connDot');
+  const label = document.getElementById('connLabel');
   const source = new EventSource('/api/events');
 
   source.addEventListener('state', (e) => {
@@ -429,47 +418,83 @@ function connectSSE() {
     render(state);
   });
 
-  source.addEventListener('error', (e) => {
-    dot.classList.remove('connected');
-    label.textContent = 'Reconnecting...';
-  });
-
   source.onerror = () => {
     dot.classList.remove('connected');
-    label.textContent = 'Disconnected';
+    label.textContent = 'Reconnecting...';
   };
 }
 
-// --- Initial load via REST (faster than waiting for first SSE tick) ---
-fetch('/api/state')
-  .then(r => r.json())
-  .then(data => { state = data; render(data); })
-  .catch(() => {});
-
+fetch('/api/state').then(r => r.json()).then(d => { state = d; render(d); }).catch(() => {});
 connectSSE();
+
+// --- Compute phases from dependency depth ---
+function computePhases(packets) {
+  if (!packets.length) return [];
+
+  const byId = {};
+  packets.forEach(p => { byId[p.id] = p; });
+
+  // Compute depth (phase number) for each packet
+  const depths = {};
+  function getDepth(p) {
+    if (depths[p.id] !== undefined) return depths[p.id];
+    if (!p.depends_on || p.depends_on.length === 0) {
+      depths[p.id] = 1;
+      return 1;
+    }
+    let maxDep = 0;
+    for (const depId of p.depends_on) {
+      if (byId[depId]) maxDep = Math.max(maxDep, getDepth(byId[depId]));
+    }
+    depths[p.id] = maxDep + 1;
+    return maxDep + 1;
+  }
+
+  packets.forEach(p => getDepth(p));
+
+  // Group packets into phases
+  const phaseMap = {};
+  packets.forEach(p => {
+    const d = depths[p.id];
+    if (!phaseMap[d]) phaseMap[d] = [];
+    phaseMap[d].push(p);
+  });
+
+  const phases = [];
+  const sortedKeys = Object.keys(phaseMap).map(Number).sort((a, b) => a - b);
+  for (const key of sortedKeys) {
+    const phasePkts = phaseMap[key];
+    const allDone = phasePkts.every(p => p.status === 'complete');
+    const anyActive = phasePkts.some(p => p.status === 'in_progress' || p.status === 'review');
+    const names = phasePkts.map(p => p.name);
+    // Create a short label from packet names
+    let label = names.length <= 2 ? names.join(' & ') : names[0] + ' + ' + (names.length - 1) + ' more';
+    if (label.length > 40) label = label.slice(0, 37) + '...';
+
+    phases.push({
+      num: key,
+      label: label,
+      status: allDone ? 'done' : anyActive ? 'active' : 'pending',
+      packets: phasePkts,
+    });
+  }
+
+  return phases;
+}
 
 // --- Render ---
 function render(s) {
-  // Build lookup maps
   workerMap = {};
   (s.workers || []).forEach(w => { workerMap[w.id] = w; });
   packetMap = {};
   (s.packets || []).forEach(p => { packetMap[p.id] = p; });
 
-  // Header
-  document.getElementById('projectName').textContent = s.project?.name || 'Multi-Claud';
-
-  // Stats
   const packets = s.packets || [];
   const activeRisks = (s.risks || []).filter(r => !r.resolved);
-  const activeWorkers = (s.workers || []).filter(w => w.status === 'working');
 
-  document.getElementById('statTotal').textContent = packets.length;
-  document.getElementById('statComplete').textContent = packets.filter(p => p.status === 'complete').length;
-  document.getElementById('statInProgress').textContent = packets.filter(p => p.status === 'in_progress').length;
-  document.getElementById('statBlocked').textContent = packets.filter(p => p.status === 'blocked').length;
-  document.getElementById('statWorkers').textContent = activeWorkers.length;
-  document.getElementById('statRisks').textContent = activeRisks.length;
+  // Phase bar
+  const phases = computePhases(packets);
+  renderPhaseBar(phases);
 
   // Risk banner
   const banner = document.getElementById('riskBanner');
@@ -485,111 +510,110 @@ function render(s) {
     banner.classList.remove('visible');
   }
 
-  // Columns
-  const columns = {
-    backlog: [], ready: [], in_progress: [], review: [], complete: []
-  };
+  // 3-column layout: Open (backlog+ready+blocked), In Progress (in_progress+review), Complete
+  const openPkts = packets.filter(p => ['backlog','ready','blocked'].includes(p.status));
+  const inProgressPkts = packets.filter(p => ['in_progress','review'].includes(p.status));
+  const completePkts = packets.filter(p => p.status === 'complete');
 
-  packets.forEach(p => {
-    const status = p.status || 'backlog';
-    if (columns[status]) columns[status].push(p);
-    else columns.backlog.push(p);
-  });
+  renderColumn('colOpen', 'countOpen', openPkts, phases);
+  renderColumn('colInProgress', 'countInProgress', inProgressPkts, phases);
+  renderColumn('colComplete', 'countComplete', completePkts, phases);
 
-  // Also treat blocked packets as backlog visually but with a blocked tag
-  // Actually, let's show blocked ones in the backlog column with a blocked badge
-  const blockedPackets = packets.filter(p => p.status === 'blocked');
-  columns.backlog = columns.backlog.concat(blockedPackets.filter(p => !columns.backlog.includes(p)));
-
-  renderColumn('colBacklog', 'countBacklog', columns.backlog);
-  renderColumn('colReady', 'countReady', columns.ready);
-  renderColumn('colInProgress', 'countInProgress', columns.in_progress);
-  renderColumn('colReview', 'countReview', columns.review);
-  renderColumn('colComplete', 'countComplete', columns.complete);
-
-  // Workers panel
+  // Workers bar
   const workers = s.workers || [];
-  const panel = document.getElementById('workersPanel');
-  const grid = document.getElementById('workersGrid');
+  const wBar = document.getElementById('workersBar');
+  const wGrid = document.getElementById('workersGrid');
   if (workers.length > 0) {
-    panel.style.display = 'block';
-    grid.innerHTML = workers.map(w => {
-      const packetName = w.assigned_packet && packetMap[w.assigned_packet]
-        ? packetMap[w.assigned_packet].name : '-';
-      return `<div class="worker-card">
-        <div class="worker-name">${esc(w.name)}</div>
-        <div class="worker-status ${esc(w.status)}">${esc(w.status)}</div>
-        <div class="worker-packet">Packet: ${esc(packetName)}</div>
+    wBar.classList.add('visible');
+    wGrid.innerHTML = workers.map(w => {
+      const pktName = w.assigned_packet && packetMap[w.assigned_packet]
+        ? packetMap[w.assigned_packet].name : '';
+      return `<div class="worker-pill">
+        <div class="worker-dot ${esc(w.status)}"></div>
+        <span class="worker-pill-name">${esc(w.name)}</span>
+        ${pktName ? `<span class="worker-pill-task">${esc(pktName)}</span>` : ''}
       </div>`;
     }).join('');
   } else {
-    panel.style.display = 'none';
+    wBar.classList.remove('visible');
   }
 }
 
-function renderColumn(containerId, countId, packets) {
-  const container = document.getElementById(containerId);
-  document.getElementById(countId).textContent = packets.length;
+function renderPhaseBar(phases) {
+  const track = document.getElementById('phaseTrack');
+  if (phases.length === 0) {
+    track.innerHTML = '<div style="color:#a69e8e;font-size:13px;">No packets yet</div>';
+    return;
+  }
 
-  container.innerHTML = packets.map(p => {
-    const worker = p.assigned_worker && workerMap[p.assigned_worker]
-      ? workerMap[p.assigned_worker] : null;
-
-    const riskCount = state ? (state.risks || []).filter(
-      r => !r.resolved && r.affected_packets.includes(p.id)
-    ).length : 0;
-
-    let tags = '';
-    if (p.status === 'blocked') {
-      tags += '<span class="tag tag-blocked">blocked</span>';
-    }
-    if (worker) {
-      tags += `<span class="tag tag-worker">${esc(worker.name)}</span>`;
-    }
-    if (riskCount > 0) {
-      tags += `<span class="tag tag-risk">${riskCount} risk${riskCount > 1 ? 's' : ''}</span>`;
-    }
-    if (p.depends_on && p.depends_on.length > 0) {
-      const depNames = p.depends_on.map(id => packetMap[id] ? packetMap[id].name : id.slice(0, 6));
-      tags += `<span class="tag tag-deps">needs: ${esc(depNames.join(', '))}</span>`;
-    }
-
-    let footer = '';
-    if (p.started_at) {
-      const started = new Date(p.started_at);
-      footer = `Started ${timeAgo(started)}`;
-    }
-    if (p.completed_at) {
-      const completed = new Date(p.completed_at);
-      footer = `Done ${timeAgo(completed)}`;
-    }
-
-    return `<div class="card" data-id="${esc(p.id)}">
-      <div class="card-name">${esc(p.name)}</div>
-      ${p.description ? `<div class="card-description">${esc(p.description)}</div>` : ''}
-      ${tags ? `<div class="card-meta">${tags}</div>` : ''}
-      ${footer ? `<div class="card-footer">${footer}</div>` : ''}
+  track.innerHTML = phases.map((phase, i) => {
+    const cls = phase.status;
+    const showConnector = i < phases.length - 1;
+    const connCls = phase.status === 'done' ? 'done' : '';
+    return `<div class="phase-step">
+      ${showConnector ? `<div class="phase-connector ${connCls}"></div>` : ''}
+      <div class="phase-node ${cls}">${cls === 'done' ? '' : phase.num}</div>
+      <div class="phase-label ${cls}">Phase ${phase.num}</div>
+      <div class="phase-name ${cls}">${esc(phase.label)}</div>
     </div>`;
   }).join('');
 }
 
-// --- Helpers ---
+function renderColumn(containerId, countId, packets, phases) {
+  const container = document.getElementById(containerId);
+  document.getElementById(countId).textContent = packets.length;
+
+  // Build a phase lookup for each packet
+  const packetPhase = {};
+  phases.forEach(ph => {
+    ph.packets.forEach(p => { packetPhase[p.id] = ph.num; });
+  });
+
+  container.innerHTML = packets.map(p => {
+    const worker = p.assigned_worker && workerMap[p.assigned_worker]
+      ? workerMap[p.assigned_worker] : null;
+    const riskCount = state ? (state.risks || []).filter(
+      r => !r.resolved && r.affected_packets.includes(p.id)
+    ).length : 0;
+    const phaseNum = packetPhase[p.id];
+
+    let tags = '';
+
+    // Type tag (feature by default, or determine from context)
+    tags += '<span class="tag tag-feature">Packet</span>';
+
+    // Phase tag
+    if (phaseNum) {
+      tags += `<span class="tag tag-phase">Phase ${phaseNum}</span>`;
+    }
+
+    // Status-specific tags
+    if (p.status === 'blocked') {
+      tags += '<span class="tag tag-blocked">Blocked</span>';
+    }
+    if (riskCount > 0) {
+      tags += `<span class="tag tag-risk">${riskCount} Risk${riskCount > 1 ? 's' : ''}</span>`;
+    }
+    if (worker) {
+      tags += `<span class="tag tag-worker">${esc(worker.name)}</span>`;
+    }
+
+    return `<div class="card">
+      <div class="card-header">
+        <div class="card-name">${esc(p.name)}</div>
+        <div class="card-id">${esc(p.id.toUpperCase())}</div>
+      </div>
+      ${p.description ? `<div class="card-description">${esc(p.description)}</div>` : ''}
+      <div class="card-tags">${tags}</div>
+    </div>`;
+  }).join('');
+}
+
 function esc(str) {
   if (typeof str !== 'string') return '';
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
-}
-
-function timeAgo(date) {
-  const seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 </script>
 </body>

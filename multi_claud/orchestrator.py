@@ -1,9 +1,15 @@
-"""Orchestrator: uses Claude Agent SDK to create build plans and assign packets."""
+"""Orchestrator: uses Claude Code CLI to create build plans and assign packets.
+
+Uses the `claude` CLI in headless mode (-p flag), which means it works with
+your existing Claude Code subscription — no separate API key needed.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import shutil
 from pathlib import Path
 
 from multi_claud.state import (
@@ -35,33 +41,50 @@ IMPORTANT: Output ONLY the JSON array. No explanation, no markdown fences, just 
 
 
 async def create_plan(sm: StateManager, description: str, model: str | None = None) -> list[dict]:
-    """Use the Claude Agent SDK to generate a build plan for the project.
+    """Use the Claude Code CLI to generate a build plan for the project.
+
+    Uses `claude -p` (headless mode) which authenticates with your existing
+    Claude Code subscription. No separate API key required.
 
     Returns the list of packet dicts created by Claude.
     """
-    from claude_agent_sdk import ClaudeAgentOptions, query
+    # Verify claude CLI is available
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        raise RuntimeError(
+            "Claude Code CLI not found. Install it from https://code.claude.com"
+        )
 
     state = sm.load()
     effective_model = model or state.config.model
     prompt = _build_plan_prompt(sm.project_path, description)
 
-    options = ClaudeAgentOptions(
-        model=effective_model,
+    cmd = [
+        "claude", "-p", prompt,
+        "--model", effective_model,
+        "--output-format", "text",
+        "--allowedTools", "Read,Glob,Grep,Bash(ls*)",
+    ]
+
+    logger.info("Launching orchestrator via claude CLI (model: %s)", effective_model)
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
         cwd=str(sm.project_path),
-        system_prompt=ORCHESTRATOR_PROMPT_PATH.read_text(encoding="utf-8"),
-        permission_mode="auto",
-        allowed_tools=["Read", "Glob", "Grep", "Bash(ls*)"],
-        max_turns=20,
-        max_budget_usd=2.0,
     )
 
-    # Collect the final text response
-    result_text = ""
-    async for message in query(prompt=prompt, options=options):
-        if hasattr(message, "content"):
-            for block in message.content:
-                if hasattr(block, "text"):
-                    result_text = block.text  # Keep the last text block
+    stdout, stderr = await process.communicate()
+
+    if process.returncode != 0:
+        error_msg = stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"Claude CLI failed (exit {process.returncode}): {error_msg}")
+
+    result_text = stdout.decode("utf-8", errors="replace").strip()
+
+    if not result_text:
+        raise RuntimeError("Claude CLI returned empty output")
 
     # Parse the JSON response
     packets_data = _parse_packets_json(result_text)
@@ -90,7 +113,6 @@ async def create_plan(sm: StateManager, description: str, model: str | None = No
                     dep_ids.append(packet_name_to_id[dep_name])
             if dep_ids:
                 sm.update_packet(packet_id, depends_on=dep_ids)
-                # Re-evaluate blocked status
                 _recompute_status(sm, packet_id)
 
     logger.info("Created %d packets from orchestrator plan", len(created_packets))
