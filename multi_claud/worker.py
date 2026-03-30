@@ -218,13 +218,12 @@ class WorkerManager:
                 # 1. Write to central build log in the project
                 self._write_build_log(packet_name, wp, last_result_text)
 
-                # 2. Mark worker idle
-                self.sm.update_worker(wp.worker_id, status=WorkerStatus.idle)
-                self.sm.update_worker(wp.worker_id, session_log=["Completed successfully"])
-
-                # 3. Mark packet COMPLETE (not review) — this triggers _unblock_dependents
+                # 2. Mark packet COMPLETE — this triggers _unblock_dependents
                 #    which automatically makes blocked packets ready for the next round
                 self.sm.update_packet(packet_id, status=PacketStatus.complete)
+
+                # 3. Remove the finished worker from state (keeps dashboard clean)
+                self.sm.remove_worker(wp.worker_id)
 
                 logger.info("Worker %s completed packet '%s' — dependents unblocked", wp.worker_id, packet_name)
             else:

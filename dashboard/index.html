@@ -540,19 +540,22 @@ function render(s) {
   renderColumn('colInProgress', 'countInProgress', inProgressPkts, phases);
   renderColumn('colComplete', 'countComplete', completePkts, phases);
 
-  // Workers bar
-  const workers = s.workers || [];
+  // Workers bar — only show workers that are currently active
+  const activeWorkers = (s.workers || []).filter(w => w.status === 'working');
   const wBar = document.getElementById('workersBar');
   const wGrid = document.getElementById('workersGrid');
-  if (workers.length > 0) {
+  if (activeWorkers.length > 0) {
     wBar.classList.add('visible');
-    wGrid.innerHTML = workers.map(w => {
+    wGrid.innerHTML = activeWorkers.map(w => {
       const pktName = w.assigned_packet && packetMap[w.assigned_packet]
         ? packetMap[w.assigned_packet].name : '';
+      const lastLog = (w.session_log && w.session_log.length > 0)
+        ? w.session_log[w.session_log.length - 1] : '';
       return `<div class="worker-pill">
-        <div class="worker-dot ${esc(w.status)}"></div>
+        <div class="worker-dot working"></div>
         <span class="worker-pill-name">${esc(w.name)}</span>
         ${pktName ? `<span class="worker-pill-task">${esc(pktName)}</span>` : ''}
+        ${lastLog ? `<span class="worker-pill-task" style="opacity:0.7">— ${esc(lastLog)}</span>` : ''}
       </div>`;
     }).join('');
   } else {
