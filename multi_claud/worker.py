@@ -269,20 +269,34 @@ class WorkerManager:
             self._handle_failure(wp, packet_id, str(e))
 
     def _handle_success(self, wp: WorkerProcess, packet_id: str, result_text: str) -> None:
-        """Handle a successful worker completion."""
+        """Handle a successful worker completion.
+
+        Documentation is written FIRST — if it fails, the packet still completes
+        but the failure is logged. Documentation must never block completion.
+        """
         packet = self.sm.get_packet(packet_id)
         packet_name = packet.name if packet else packet_id
 
-        # Write to build log
-        self._write_build_log(packet_name, wp, result_text)
+        # 1. Write to build log (non-blocking — failures logged, not raised)
+        try:
+            self._write_build_log(packet_name, wp, result_text)
+        except Exception as e:
+            logger.error("Failed to write build log for '%s': %s (continuing anyway)", packet_name, e)
 
-        # Mark complete — triggers _unblock_dependents
+        # 2. Verify documentation exists — warn if missing
+        packet = self.sm.get_packet(packet_id)
+        if packet and (not packet.documentation or len(packet.documentation.strip()) < 20):
+            logger.warning("Packet '%s' completed with missing/minimal documentation", packet_name)
+            if result_text:
+                self.sm.update_packet(packet_id, documentation=result_text[:3000])
+
+        # 3. Mark complete — triggers _unblock_dependents
         self.sm.update_packet(packet_id, status=PacketStatus.complete)
 
-        # Clean up worker from state
+        # 4. Clean up worker from state
         self.sm.remove_worker(wp.worker_id)
 
-        # Remove from local tracking
+        # 4. Remove from local tracking
         self.workers.pop(wp.worker_id, None)
 
         logger.info("Worker %s completed '%s' — dependents unblocked", wp.worker_id, packet_name)
