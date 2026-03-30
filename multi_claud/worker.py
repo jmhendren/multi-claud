@@ -107,11 +107,12 @@ class WorkerManager:
         # Generate worktree branch name
         branch_name = f"mc-worker-{worker.id}-{packet_id[:6]}"
 
-        # Launch Claude Code in headless mode
+        # Launch Claude Code in headless mode with streaming output
         cmd = [
             "claude",
             "-p", prompt,
-            "--output-format", "json",
+            "--output-format", "stream-json",
+            "--verbose",
             "--model", state.config.worker_model,
             "--allowedTools", "Read,Write,Edit,Bash,Glob,Grep",
             "--dangerously-skip-permissions",
@@ -147,62 +148,114 @@ class WorkerManager:
         return worker.id
 
     async def _monitor_worker(self, wp: WorkerProcess, packet_id: str) -> None:
-        """Monitor a worker's output and update state when it completes."""
+        """Monitor a worker's stream-json output and update state live."""
+        last_result_text = ""
         try:
-            # Read stdout
-            stdout_data = b""
-            if wp.process.stdout:
-                stdout_data = await wp.process.stdout.read()
+            # Read stdout line by line (stream-json is newline-delimited JSON)
+            while wp.process.stdout and not wp.process.stdout.at_eof():
+                line = await wp.process.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if not decoded:
+                    continue
 
-            # Read stderr
-            stderr_data = b""
+                wp.output_lines.append(decoded)
+
+                try:
+                    data = json.loads(decoded)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = data.get("type", "")
+
+                # Track live activity for dashboard
+                if msg_type == "assistant":
+                    msg = data.get("message", {})
+                    content = msg.get("content", [])
+                    for block in content:
+                        if block.get("type") == "tool_use":
+                            tool_name = block.get("name", "")
+                            tool_input = block.get("input", {})
+                            activity = self._describe_tool_use(tool_name, tool_input)
+                            self.sm.update_worker(wp.worker_id, session_log=[activity])
+
+                            # Track file touches
+                            if tool_name in ("Write", "Edit", "Read"):
+                                fpath = tool_input.get("file_path", "")
+                                if fpath and tool_name in ("Write", "Edit"):
+                                    self._record_file_touch(packet_id, fpath)
+
+                        elif block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                last_result_text = text
+
+                # Capture final result
+                if msg_type == "result":
+                    result_text = data.get("result", "")
+                    if result_text:
+                        last_result_text = result_text
+
+            # Read any remaining stderr
+            stderr_text = ""
             if wp.process.stderr:
                 stderr_data = await wp.process.stderr.read()
+                stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
 
             # Wait for process to finish
             exit_code = await wp.wait()
 
-            stdout_text = stdout_data.decode("utf-8", errors="replace").strip()
-            stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
-
-            if stdout_text:
-                wp.output_lines.append(stdout_text)
-
-            # Try to parse JSON output for file tracking
-            if stdout_text:
-                try:
-                    result = json.loads(stdout_text)
-                    # JSON output has a "result" field with the response text
-                    if isinstance(result, dict) and result.get("result"):
-                        self.sm.update_packet(
-                            packet_id,
-                            documentation=result["result"][:2000],
-                        )
-                except json.JSONDecodeError:
-                    pass
+            # Save documentation from the worker's output
+            if last_result_text:
+                self.sm.update_packet(packet_id, documentation=last_result_text[:3000])
 
             # Update state based on exit code
             if exit_code == 0:
                 self.sm.update_worker(wp.worker_id, status=WorkerStatus.idle)
                 self.sm.update_packet(packet_id, status=PacketStatus.review)
-                log_entry = f"Completed successfully"
-                self.sm.update_worker(wp.worker_id, session_log=[log_entry])
+                self.sm.update_worker(wp.worker_id, session_log=["Completed successfully"])
                 logger.info("Worker %s completed successfully", wp.worker_id)
             else:
                 self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
                 error_msg = stderr_text[:500] if stderr_text else f"Exit code {exit_code}"
-                log_entry = f"FAILED: {error_msg}"
-                self.sm.update_worker(wp.worker_id, session_log=[log_entry])
-                self.sm.update_packet(
-                    packet_id,
-                    documentation=f"Worker failed: {error_msg}",
-                )
+                self.sm.update_worker(wp.worker_id, session_log=[f"FAILED: {error_msg}"])
+                if not last_result_text:
+                    self.sm.update_packet(packet_id, documentation=f"Worker failed: {error_msg}")
                 logger.error("Worker %s failed (exit %d): %s", wp.worker_id, exit_code, error_msg)
 
         except Exception as e:
             logger.error("Error monitoring worker %s: %s", wp.worker_id, e)
             self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
             self.sm.update_worker(wp.worker_id, session_log=[f"EXCEPTION: {e}"])
+
+    @staticmethod
+    def _describe_tool_use(tool_name: str, tool_input: dict) -> str:
+        """Create a short human-readable description of a tool call."""
+        if tool_name == "Read":
+            path = tool_input.get("file_path", "?")
+            return f"Reading {path.split('/')[-1]}"
+        elif tool_name == "Write":
+            path = tool_input.get("file_path", "?")
+            return f"Writing {path.split('/')[-1]}"
+        elif tool_name == "Edit":
+            path = tool_input.get("file_path", "?")
+            return f"Editing {path.split('/')[-1]}"
+        elif tool_name == "Bash":
+            cmd = tool_input.get("command", "?")
+            desc = tool_input.get("description", "")
+            return f"Running: {desc or cmd[:60]}"
+        elif tool_name == "Glob":
+            pattern = tool_input.get("pattern", "?")
+            return f"Searching: {pattern}"
+        elif tool_name == "Grep":
+            pattern = tool_input.get("pattern", "?")
+            return f"Searching for: {pattern}"
+        elif tool_name == "WebSearch":
+            query = tool_input.get("query", "?")
+            return f"Searching web: {query[:50]}"
+        else:
+            return f"Using {tool_name}"
 
     def _process_output_line(self, wp: WorkerProcess, line: str, packet_id: str) -> None:
         """Process a line of stream-json output from a worker."""

@@ -147,9 +147,39 @@ class StateManager:
         self._lock = FileLock(self.lock_file)
 
     def _load_unlocked(self) -> ProjectState:
-        """Read state from disk. Caller must hold self._lock."""
+        """Read state from disk. Caller must hold self._lock.
+
+        Normalizes common invalid enum values that external processes
+        (like Claude worker sessions) may write to the state file.
+        """
         raw = self.state_file.read_text(encoding="utf-8")
-        return ProjectState.model_validate_json(raw)
+        data = json.loads(raw)
+
+        # Normalize packet statuses
+        packet_status_map = {
+            "completed": "complete", "done": "complete", "finished": "complete",
+            "todo": "backlog", "pending": "backlog", "queued": "ready",
+            "wip": "in_progress", "working": "in_progress",
+            "reviewing": "review",
+        }
+        for p in data.get("packets", []):
+            s = p.get("status", "")
+            if s in packet_status_map:
+                p["status"] = packet_status_map[s]
+
+        # Normalize worker statuses
+        worker_status_map = {
+            "done": "idle", "completed": "idle", "finished": "idle",
+            "running": "working", "active": "working", "busy": "working",
+            "failed": "error", "crashed": "error",
+            "killed": "stopped", "terminated": "stopped",
+        }
+        for w in data.get("workers", []):
+            s = w.get("status", "")
+            if s in worker_status_map:
+                w["status"] = worker_status_map[s]
+
+        return ProjectState.model_validate(data)
 
     def _save_unlocked(self, state: ProjectState) -> None:
         """Write state to disk. Caller must hold self._lock."""

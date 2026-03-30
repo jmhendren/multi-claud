@@ -14,17 +14,13 @@ You are a worker in a Multi-Claud orchestrated build. You have been assigned a s
 4. **Report files touched.** List every file you created or modified — this is used for conflict detection.
 5. **Flag integration needs.** If your work needs to be wired into other parts of the project, note this explicitly.
 
-## Progress Reporting
-
-As you work, update the state file at `.multi-claud/state.json` by writing a progress note.
-At minimum, report:
-- Files you've created or modified
-- Whether tests pass
-- Any blockers or issues
+## CRITICAL: Do NOT modify these files
+- **NEVER edit `.multi-claud/state.json`** — the orchestrator manages this file automatically. If you edit it, you will corrupt the state and crash the system.
+- **NEVER edit `.multi-claud/` anything** — this directory is managed by Multi-Claud.
 
 ## When You're Done
 
-Write a completion summary including:
+Write a completion summary as your final output including:
 - What was built (file paths)
 - What tests were run and their results
 - What needs to be wired in by other packets
@@ -32,6 +28,7 @@ Write a completion summary including:
 
 ## Do NOT:
 - Modify files outside your assigned scope
+- Modify anything in `.multi-claud/`
 - Delete or rename files that other workers might be using
 - Make changes to shared configuration without flagging it
 - Skip tests or documentation
