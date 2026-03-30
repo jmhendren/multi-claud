@@ -1,12 +1,21 @@
-"""Worker manager: launches and monitors Claude Code sessions in git worktrees."""
+"""Worker manager: launches and monitors Claude Code sessions.
+
+Includes:
+- Live streaming of worker activity via stream-json
+- Automatic reaper for dead worker processes
+- Auto-retry on failure (up to max_retries per packet)
+- Self-healing orchestration loop
+- CLI dry-run validation before launching workers
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
+import shutil
 import signal
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +28,8 @@ from multi_claud.state import (
 logger = logging.getLogger(__name__)
 
 WORKER_PROMPT_PATH = Path(__file__).parent.parent / "templates" / "worker-prompt.md"
+
+MAX_RETRIES_DEFAULT = 2
 
 
 def _build_worker_prompt(packet_name: str, packet_description: str,
@@ -37,15 +48,62 @@ Now begin working on your assigned packet. Stay in scope, document everything,
 and report what files you create or modify."""
 
 
+def validate_cli() -> str | None:
+    """Validate that the claude CLI is available and working.
+
+    Returns None on success, or an error message string.
+    """
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        return "Claude Code CLI not found. Install it from https://code.claude.com"
+
+    # Dry-run: test that the flags we use actually work
+    try:
+        result = asyncio.get_event_loop().run_until_complete(
+            _dry_run_cli()
+        )
+        return result
+    except Exception:
+        # If we can't get an event loop, try sync
+        try:
+            import subprocess
+            proc = subprocess.run(
+                ["claude", "-p", "Say OK", "--output-format", "stream-json", "--verbose",
+                 "--dangerously-skip-permissions"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode != 0:
+                return f"Claude CLI test failed: {proc.stderr[:200]}"
+        except Exception as e:
+            return f"Claude CLI test failed: {e}"
+
+    return None
+
+
+async def _dry_run_cli() -> str | None:
+    """Async dry-run of the claude CLI to verify flags work."""
+    proc = await asyncio.create_subprocess_exec(
+        "claude", "-p", "Say OK", "--output-format", "stream-json", "--verbose",
+        "--dangerously-skip-permissions",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    if proc.returncode != 0:
+        return f"Claude CLI test failed: {stderr.decode()[:200]}"
+    return None
+
+
 class WorkerProcess:
     """Manages a single Claude Code worker subprocess."""
 
     def __init__(self, worker_id: str, name: str, process: asyncio.subprocess.Process,
-                 worktree_branch: str):
+                 worktree_branch: str, packet_id: str):
         self.worker_id = worker_id
         self.name = name
         self.process = process
         self.worktree_branch = worktree_branch
+        self.packet_id = packet_id
         self.output_lines: list[str] = []
 
     @property
@@ -73,18 +131,14 @@ class WorkerProcess:
 
 
 class WorkerManager:
-    """Manages multiple Claude Code worker sessions."""
+    """Manages multiple Claude Code worker sessions with self-healing capabilities."""
 
     def __init__(self, sm: StateManager):
         self.sm = sm
         self.workers: dict[str, WorkerProcess] = {}
-        self._monitoring = False
 
     async def launch_worker(self, packet_id: str) -> str:
-        """Launch a Claude Code worker for a specific packet.
-
-        Returns the worker ID.
-        """
+        """Launch a Claude Code worker for a specific packet. Returns the worker ID."""
         state = self.sm.load()
         packet = next((p for p in state.packets if p.id == packet_id), None)
         if not packet:
@@ -104,7 +158,6 @@ class WorkerManager:
             self.sm.project_path,
         )
 
-        # Generate worktree branch name
         branch_name = f"mc-worker-{worker.id}-{packet_id[:6]}"
 
         # Launch Claude Code in headless mode with streaming output
@@ -118,7 +171,8 @@ class WorkerManager:
             "--dangerously-skip-permissions",
         ]
 
-        logger.info("Launching worker %s for packet '%s'", worker.id, packet.name)
+        logger.info("Launching worker %s for packet '%s' (attempt %d)",
+                     worker.id, packet.name, packet.retry_count + 1)
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -132,17 +186,17 @@ class WorkerManager:
             name=worker.name,
             process=process,
             worktree_branch=branch_name,
+            packet_id=packet_id,
         )
         self.workers[worker.id] = wp
 
-        # Update worker state with PID
         self.sm.update_worker(
             worker.id,
             pid=process.pid,
             worktree_branch=branch_name,
         )
 
-        # Start monitoring this worker's output in the background
+        # Start monitoring in the background
         asyncio.create_task(self._monitor_worker(wp, packet_id))
 
         return worker.id
@@ -151,7 +205,6 @@ class WorkerManager:
         """Monitor a worker's stream-json output and update state live."""
         last_result_text = ""
         try:
-            # Read stdout line by line (stream-json is newline-delimited JSON)
             while wp.process.stdout and not wp.process.stdout.at_eof():
                 line = await wp.process.stdout.readline()
                 if not line:
@@ -169,7 +222,6 @@ class WorkerManager:
 
                 msg_type = data.get("type", "")
 
-                # Track live activity for dashboard
                 if msg_type == "assistant":
                     msg = data.get("message", {})
                     content = msg.get("content", [])
@@ -180,10 +232,9 @@ class WorkerManager:
                             activity = self._describe_tool_use(tool_name, tool_input)
                             self.sm.update_worker(wp.worker_id, session_log=[activity])
 
-                            # Track file touches
-                            if tool_name in ("Write", "Edit", "Read"):
+                            if tool_name in ("Write", "Edit"):
                                 fpath = tool_input.get("file_path", "")
-                                if fpath and tool_name in ("Write", "Edit"):
+                                if fpath:
                                     self._record_file_touch(packet_id, fpath)
 
                         elif block.get("type") == "text":
@@ -191,53 +242,86 @@ class WorkerManager:
                             if text:
                                 last_result_text = text
 
-                # Capture final result
                 if msg_type == "result":
                     result_text = data.get("result", "")
                     if result_text:
                         last_result_text = result_text
 
-            # Read any remaining stderr
+            # Read remaining stderr
             stderr_text = ""
             if wp.process.stderr:
                 stderr_data = await wp.process.stderr.read()
                 stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
 
-            # Wait for process to finish
             exit_code = await wp.wait()
 
-            # Save documentation from the worker's output
             if last_result_text:
                 self.sm.update_packet(packet_id, documentation=last_result_text[:3000])
 
-            # Update state based on exit code
             if exit_code == 0:
-                packet = self.sm.get_packet(packet_id)
-                packet_name = packet.name if packet else packet_id
-
-                # 1. Write to central build log in the project
-                self._write_build_log(packet_name, wp, last_result_text)
-
-                # 2. Mark packet COMPLETE — this triggers _unblock_dependents
-                #    which automatically makes blocked packets ready for the next round
-                self.sm.update_packet(packet_id, status=PacketStatus.complete)
-
-                # 3. Remove the finished worker from state (keeps dashboard clean)
-                self.sm.remove_worker(wp.worker_id)
-
-                logger.info("Worker %s completed packet '%s' — dependents unblocked", wp.worker_id, packet_name)
+                self._handle_success(wp, packet_id, last_result_text)
             else:
-                self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
                 error_msg = stderr_text[:500] if stderr_text else f"Exit code {exit_code}"
-                self.sm.update_worker(wp.worker_id, session_log=[f"FAILED: {error_msg}"])
-                if not last_result_text:
-                    self.sm.update_packet(packet_id, documentation=f"Worker failed: {error_msg}")
-                logger.error("Worker %s failed (exit %d): %s", wp.worker_id, exit_code, error_msg)
+                self._handle_failure(wp, packet_id, error_msg)
 
         except Exception as e:
-            logger.error("Error monitoring worker %s: %s", wp.worker_id, e)
-            self.sm.update_worker(wp.worker_id, status=WorkerStatus.error)
-            self.sm.update_worker(wp.worker_id, session_log=[f"EXCEPTION: {e}"])
+            logger.error("Exception monitoring worker %s: %s", wp.worker_id, e)
+            self._handle_failure(wp, packet_id, str(e))
+
+    def _handle_success(self, wp: WorkerProcess, packet_id: str, result_text: str) -> None:
+        """Handle a successful worker completion."""
+        packet = self.sm.get_packet(packet_id)
+        packet_name = packet.name if packet else packet_id
+
+        # Write to build log
+        self._write_build_log(packet_name, wp, result_text)
+
+        # Mark complete — triggers _unblock_dependents
+        self.sm.update_packet(packet_id, status=PacketStatus.complete)
+
+        # Clean up worker from state
+        self.sm.remove_worker(wp.worker_id)
+
+        # Remove from local tracking
+        self.workers.pop(wp.worker_id, None)
+
+        logger.info("Worker %s completed '%s' — dependents unblocked", wp.worker_id, packet_name)
+
+    def _handle_failure(self, wp: WorkerProcess, packet_id: str, error_msg: str) -> None:
+        """Handle a worker failure with auto-retry logic."""
+        packet = self.sm.get_packet(packet_id)
+        packet_name = packet.name if packet else packet_id
+        retry_count = packet.retry_count if packet else 0
+        max_retries = packet.max_retries if packet else MAX_RETRIES_DEFAULT
+
+        if retry_count < max_retries:
+            # Retry: reset packet to ready, increment retry counter
+            logger.warning("Worker %s failed on '%s' (attempt %d/%d) — will retry: %s",
+                           wp.worker_id, packet_name, retry_count + 1, max_retries, error_msg)
+            self.sm.update_packet(
+                packet_id,
+                status=PacketStatus.ready,
+                assigned_worker=None,
+                retry_count=retry_count + 1,
+                last_error=error_msg[:500],
+            )
+        else:
+            # Max retries exceeded — mark as error status
+            logger.error("Worker %s failed on '%s' after %d attempts — giving up: %s",
+                         wp.worker_id, packet_name, max_retries, error_msg)
+            self.sm.update_packet(
+                packet_id,
+                status=PacketStatus.blocked,
+                assigned_worker=None,
+                last_error=f"Failed after {max_retries} attempts: {error_msg[:400]}",
+            )
+
+        # Clean up worker
+        try:
+            self.sm.remove_worker(wp.worker_id)
+        except Exception:
+            pass
+        self.workers.pop(wp.worker_id, None)
 
     def _write_build_log(self, packet_name: str, wp: WorkerProcess, result_text: str) -> None:
         """Append a completed packet's work summary to the project's build log."""
@@ -246,7 +330,6 @@ class WorkerManager:
 
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Get files touched from state
         packet = None
         state = self.sm.load()
         for p in state.packets:
@@ -273,7 +356,6 @@ class WorkerManager:
 {result_text[:2000] if result_text else "(No summary provided)"}
 """
 
-        # Append to build log
         if build_log.exists():
             existing = build_log.read_text(encoding="utf-8")
         else:
@@ -310,24 +392,6 @@ class WorkerManager:
         else:
             return f"Using {tool_name}"
 
-    def _process_output_line(self, wp: WorkerProcess, line: str, packet_id: str) -> None:
-        """Process a line of stream-json output from a worker."""
-        try:
-            data = json.loads(line)
-            # Update last activity timestamp
-            self.sm.update_worker(wp.worker_id, last_activity=datetime.now(timezone.utc))
-
-            # Check for tool use that indicates file changes
-            if data.get("type") == "tool_use":
-                tool_name = data.get("name", "")
-                if tool_name in ("Write", "Edit"):
-                    file_path = data.get("input", {}).get("file_path", "")
-                    if file_path:
-                        self._record_file_touch(packet_id, file_path)
-
-        except (json.JSONDecodeError, KeyError):
-            pass  # Not all lines are JSON
-
     def _record_file_touch(self, packet_id: str, file_path: str) -> None:
         """Record that a packet touched a file."""
         packet = self.sm.get_packet(packet_id)
@@ -335,20 +399,57 @@ class WorkerManager:
             files = list(packet.files_touched) + [file_path]
             self.sm.update_packet(packet_id, files_touched=files)
 
-    async def launch_available(self, max_workers: int | None = None) -> list[str]:
-        """Launch workers for all available ready packets up to max_workers.
+    # --- Reaper: detect and clean up dead workers ---
 
-        Returns list of launched worker IDs.
+    def reap_dead_workers(self) -> list[str]:
+        """Check all workers in state for dead PIDs and clean them up.
+
+        Returns list of packet IDs that were freed up for retry.
         """
+        state = self.sm.load()
+        freed_packets = []
+
+        for worker in list(state.workers):
+            if worker.status != WorkerStatus.working:
+                continue
+            if not worker.pid:
+                continue
+
+            # Check if PID is alive
+            try:
+                os.kill(worker.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                # Process is dead — clean up
+                logger.warning("Reaper: Worker %s (PID %d) is dead", worker.name, worker.pid)
+
+                if worker.assigned_packet:
+                    packet = next((p for p in state.packets if p.id == worker.assigned_packet), None)
+                    if packet and packet.status == PacketStatus.in_progress:
+                        freed_packets.append(packet.id)
+
+                # Use the state manager to handle cleanup properly
+                self._handle_failure(
+                    _GhostWorker(worker.id, worker.name, worker.assigned_packet),
+                    worker.assigned_packet or "",
+                    "Worker process died unexpectedly",
+                )
+
+        return freed_packets
+
+    # --- Launch helpers ---
+
+    async def launch_available(self, max_workers: int | None = None) -> list[str]:
+        """Launch workers for all available ready packets up to max_workers."""
         state = self.sm.load()
         limit = max_workers or state.config.max_workers
 
-        # Count currently active workers
-        active_count = len([w for w in self.workers.values() if w.is_running])
+        # Count currently active workers (both local and in state)
+        active_local = len([w for w in self.workers.values() if w.is_running])
+        active_state = len([w for w in state.workers if w.status == WorkerStatus.working])
+        active_count = max(active_local, active_state)
         slots = limit - active_count
 
         if slots <= 0:
-            logger.info("All worker slots full (%d/%d)", active_count, limit)
             return []
 
         # Get ready packets not already assigned
@@ -362,56 +463,88 @@ class WorkerManager:
             try:
                 worker_id = await self.launch_worker(packet.id)
                 launched.append(worker_id)
+                logger.info("Launched worker for '%s'%s",
+                            packet.name,
+                            f" (retry {packet.retry_count})" if packet.retry_count > 0 else "")
             except Exception as e:
                 logger.error("Failed to launch worker for packet %s: %s", packet.id, e)
 
         return launched
 
-    async def run_auto(self, max_workers: int | None = None, poll_interval: int = 5) -> None:
-        """Auto-continue mode: launch workers, wait, launch next round, repeat.
+    # --- Self-healing auto-continue loop ---
 
-        Keeps running until all packets are complete or no more work can be done.
+    async def run_auto(self, max_workers: int | None = None, poll_interval: int = 5) -> None:
+        """Self-healing auto-continue mode.
+
+        Continuously:
+        1. Reaps dead workers and resets their packets for retry
+        2. Launches workers for any ready packets
+        3. Waits and repeats
+        4. Stops when all packets are complete or permanently stuck
         """
         state = self.sm.load()
         limit = max_workers or state.config.max_workers
         total_packets = len(state.packets)
 
-        logger.info("Auto-continue mode: %d packets, up to %d workers", total_packets, limit)
+        logger.info("Auto mode: %d packets, up to %d workers, %d max retries",
+                     total_packets, limit, MAX_RETRIES_DEFAULT)
+
+        stuck_cycles = 0
+        max_stuck_cycles = 12  # 60 seconds of no progress before declaring stuck
 
         while True:
-            # Launch any available work
+            # 1. Reap dead workers
+            freed = self.reap_dead_workers()
+            if freed:
+                logger.info("Reaper freed %d packet(s) for retry", len(freed))
+                stuck_cycles = 0
+
+            # 2. Launch available work
             launched = await self.launch_available(max_workers=limit)
             if launched:
                 logger.info("Launched %d new worker(s)", len(launched))
+                stuck_cycles = 0
 
-            # Check if there's any running work
-            running = [wp for wp in self.workers.values() if wp.is_running]
+            # 3. Check overall progress
+            state = self.sm.load()
+            complete = [p for p in state.packets if p.status == PacketStatus.complete]
+            in_prog = [p for p in state.packets if p.status == PacketStatus.in_progress]
+            ready = [p for p in state.packets if p.status == PacketStatus.ready]
+            blocked = [p for p in state.packets if p.status == PacketStatus.blocked]
 
-            if not running:
-                # Nothing running — check if there's anything left to do
-                state = self.sm.load()
-                ready = [p for p in state.packets if p.status.value == "ready"]
-                blocked = [p for p in state.packets if p.status.value == "blocked"]
-                complete = [p for p in state.packets if p.status.value == "complete"]
+            running_local = [wp for wp in self.workers.values() if wp.is_running]
 
-                if not ready and not blocked:
-                    logger.info("All packets complete or no more work available")
-                    break
-                elif not ready and blocked:
-                    # Everything remaining is blocked — check if it's stuck
-                    in_prog = [p for p in state.packets if p.status.value == "in_progress"]
-                    if not in_prog:
-                        logger.warning("Remaining packets are blocked with no work in progress — may be stuck")
+            # All done?
+            if len(complete) == total_packets:
+                logger.info("All %d packets complete!", total_packets)
+                break
+
+            # Nothing running and nothing to launch?
+            if not running_local and not ready:
+                if blocked and not in_prog:
+                    stuck_cycles += 1
+                    if stuck_cycles >= max_stuck_cycles:
+                        failed = [p for p in blocked if p.last_error]
+                        logger.warning(
+                            "Stuck: %d blocked packets, no work in progress. "
+                            "%d packets failed permanently.",
+                            len(blocked), len(failed)
+                        )
                         break
+                elif not blocked and not in_prog:
+                    logger.info("No more work to do. %d/%d complete.", len(complete), total_packets)
+                    break
 
-            # Wait before checking again
+            # Wait before next cycle
             await asyncio.sleep(poll_interval)
 
         # Final summary
         state = self.sm.load()
-        complete = len([p for p in state.packets if p.status.value == "complete"])
-        total = len(state.packets)
-        logger.info("Auto-continue finished: %d/%d packets complete", complete, total)
+        complete = len([p for p in state.packets if p.status == PacketStatus.complete])
+        failed = [p for p in state.packets if p.last_error and p.status != PacketStatus.complete]
+        logger.info("Auto mode finished: %d/%d complete, %d failed", complete, total_packets, len(failed))
+        for p in failed:
+            logger.info("  FAILED: %s — %s", p.name, p.last_error[:100])
 
     async def stop_all(self) -> None:
         """Stop all running workers."""
@@ -422,30 +555,35 @@ class WorkerManager:
                 try:
                     await asyncio.wait_for(wp.wait(), timeout=10)
                 except asyncio.TimeoutError:
-                    logger.warning("Worker %s didn't stop gracefully, killing", worker_id)
                     await wp.kill()
 
                 self.sm.update_worker(worker_id, status=WorkerStatus.stopped)
-
-                # Reset packet to ready if it was in progress
-                packet_id = self.sm.get_worker(worker_id)
-                if packet_id:
-                    worker_data = self.sm.get_worker(worker_id)
-                    if worker_data and worker_data.assigned_packet:
-                        pkt = self.sm.get_packet(worker_data.assigned_packet)
-                        if pkt and pkt.status == PacketStatus.in_progress:
-                            self.sm.update_packet(pkt.id, status=PacketStatus.ready)
+                worker_data = self.sm.get_worker(worker_id)
+                if worker_data and worker_data.assigned_packet:
+                    pkt = self.sm.get_packet(worker_data.assigned_packet)
+                    if pkt and pkt.status == PacketStatus.in_progress:
+                        self.sm.update_packet(pkt.id, status=PacketStatus.ready, assigned_worker=None)
 
     def get_status(self) -> list[dict]:
         """Get status of all managed workers."""
-        result = []
-        for worker_id, wp in self.workers.items():
-            result.append({
+        return [
+            {
                 "id": worker_id,
                 "name": wp.name,
                 "pid": wp.pid,
                 "running": wp.is_running,
                 "branch": wp.worktree_branch,
+                "packet_id": wp.packet_id,
                 "output_lines": len(wp.output_lines),
-            })
-        return result
+            }
+            for worker_id, wp in self.workers.items()
+        ]
+
+
+class _GhostWorker:
+    """Minimal stand-in for a dead WorkerProcess so _handle_failure can clean up."""
+
+    def __init__(self, worker_id: str, name: str, packet_id: str | None):
+        self.worker_id = worker_id
+        self.name = name
+        self.packet_id = packet_id

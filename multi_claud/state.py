@@ -77,6 +77,9 @@ class Packet(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    retry_count: int = 0
+    max_retries: int = 2
+    last_error: str | None = None
 
 
 class Worker(BaseModel):

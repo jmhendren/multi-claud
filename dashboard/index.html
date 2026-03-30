@@ -612,8 +612,13 @@ function renderColumn(containerId, countId, packets, phases) {
     }
 
     // Status-specific tags
-    if (p.status === 'blocked') {
+    if (p.status === 'blocked' && p.last_error) {
+      tags += '<span class="tag tag-high">Failed</span>';
+    } else if (p.status === 'blocked') {
       tags += '<span class="tag tag-blocked">Blocked</span>';
+    }
+    if (p.retry_count > 0) {
+      tags += `<span class="tag tag-chore">Retry ${p.retry_count}</span>`;
     }
     if (riskCount > 0) {
       tags += `<span class="tag tag-risk">${riskCount} Risk${riskCount > 1 ? 's' : ''}</span>`;
@@ -624,8 +629,9 @@ function renderColumn(containerId, countId, packets, phases) {
 
     // Status message (worker activity or error)
     let statusHtml = '';
-    if (p.status === 'complete') {
-      // Completed packets — show a brief summary, not worker activity
+    if (p.last_error && p.status !== 'complete') {
+      statusHtml = `<div class="card-status error">${esc(p.last_error)}</div>`;
+    } else if (p.status === 'complete') {
       const completedAt = p.completed_at ? new Date(p.completed_at) : null;
       const doneText = completedAt ? `Completed ${timeAgo(completedAt)}` : 'Completed';
       statusHtml = `<div class="card-status" style="background:#e5eddf;color:#4a6a3f;">${doneText}</div>`;
