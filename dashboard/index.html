@@ -621,16 +621,21 @@ function renderColumn(containerId, countId, packets, phases) {
 
     // Status message (worker activity or error)
     let statusHtml = '';
-    if (worker && worker.session_log && worker.session_log.length > 0) {
+    if (p.status === 'complete') {
+      // Completed packets — show a brief summary, not worker activity
+      const completedAt = p.completed_at ? new Date(p.completed_at) : null;
+      const doneText = completedAt ? `Completed ${timeAgo(completedAt)}` : 'Completed';
+      statusHtml = `<div class="card-status" style="background:#e5eddf;color:#4a6a3f;">${doneText}</div>`;
+    } else if (worker && worker.status === 'error') {
+      const errDoc = p.documentation && p.documentation.startsWith('Worker failed')
+        ? p.documentation : 'Worker encountered an error';
+      statusHtml = `<div class="card-status error">${esc(errDoc)}</div>`;
+    } else if (worker && worker.session_log && worker.session_log.length > 0) {
       const lastLog = worker.session_log[worker.session_log.length - 1];
       const isFail = lastLog.startsWith('FAILED') || lastLog.startsWith('EXCEPTION');
       statusHtml = `<div class="card-status ${isFail ? 'error' : 'working'}">${esc(lastLog)}</div>`;
     } else if (worker && worker.status === 'working') {
       statusHtml = '<div class="card-status working">Working...</div>';
-    } else if (worker && worker.status === 'error') {
-      const errDoc = p.documentation && p.documentation.startsWith('Worker failed')
-        ? p.documentation : 'Worker encountered an error';
-      statusHtml = `<div class="card-status error">${esc(errDoc)}</div>`;
     }
 
     return `<div class="card">
@@ -643,6 +648,17 @@ function renderColumn(containerId, countId, packets, phases) {
       ${statusHtml}
     </div>`;
   }).join('');
+}
+
+function timeAgo(date) {
+  const seconds = Math.floor((new Date() - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function esc(str) {
